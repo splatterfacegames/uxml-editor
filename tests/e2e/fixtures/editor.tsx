@@ -88,6 +88,12 @@ export interface EditorFixtureBridge {
   observations(): Promise<HostObservations>;
   snapshot(): Promise<HarnessSnapshot>;
   runtimeState(): RuntimeState;
+  /**
+   * Authoritative unsaved session bytes for one project-relative file — the
+   * exact text a Save would write, including authored line endings. Read-only
+   * observation; the bridge may observe state but must not dispatch commands.
+   */
+  unsavedText(path: string): string | null;
 }
 
 class SelectableMemoryHost extends MemoryHost {
@@ -296,6 +302,7 @@ class DeterministicSourceEditScheduler implements SourceEditScheduler {
 class ProductionEditorHarness {
   private reactRoot: Root | null = null;
   private host: SelectableMemoryHost | null = null;
+  private store: ReturnType<typeof createRuntimeEditorStore> | null = null;
   private workflow: FileWorkflow | null = null;
   private baselines = new Map<EditorFixtureProjectKey, ProjectSnapshot>();
   private runtimeSequence = 0;
@@ -363,6 +370,7 @@ class ProductionEditorHarness {
       lateHostOperations: this.retiredHosts.reduce((total, host) => total + host.lateOperations, 0),
       sourceSchedulers: Object.freeze(this.sourceSchedulers.map((scheduler) => scheduler.snapshot())),
     }),
+    unsavedText: (path) => this.store?.getSnapshot().session?.snapshot().files.get(path)?.text ?? null,
   });
 
   private async mountRuntime(host: SelectableMemoryHost): Promise<void> {
@@ -377,6 +385,7 @@ class ProductionEditorHarness {
       storage: null,
       viewport: { width: window.innerWidth, height: window.innerHeight },
     });
+    this.store = store;
     const runtimeHost = store.getSnapshot().host;
     if (runtimeHost === null) throw new Error('Production editor fixture host is unavailable.');
     const workflow = new FileWorkflow(store, runtimeHost);
@@ -399,6 +408,7 @@ class ProductionEditorHarness {
     const workflow = this.workflow;
     this.reactRoot.unmount();
     this.reactRoot = null;
+    this.store = null;
     this.workflow = null;
     await workflow.dispose();
     await host.settled();
