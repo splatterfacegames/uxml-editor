@@ -29,19 +29,19 @@ describe('workspace accessibility', () => {
     const paletteButton = screen.getByRole('button', { name: 'Command Palette' });
     paletteButton.focus();
     await user.click(paletteButton);
-    const dialog = screen.getByRole('dialog', { name: 'Command Palette' });
+    const dialog = screen.getByRole('dialog', { name: 'Command palette' });
     expect(dialog).toBeInTheDocument();
     const search = screen.getByRole('searchbox', { name: 'Search commands' });
     expect(search).toHaveFocus();
 
     fireEvent.keyDown(search, { key: 'Tab', shiftKey: true });
-    const enabledOptions = screen.getAllByRole('option').filter((option) => !option.hasAttribute('disabled'));
+    const enabledOptions = screen.getAllByRole('option').filter((option) => option.getAttribute('aria-disabled') !== 'true');
     expect(enabledOptions.at(-1)).toHaveFocus();
     fireEvent.keyDown(enabledOptions.at(-1)!, { key: 'Tab' });
     expect(search).toHaveFocus();
 
     await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog', { name: 'Command Palette' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
     expect(paletteButton).toHaveFocus();
   }, 15_000);
 
@@ -144,7 +144,7 @@ describe('workspace accessibility', () => {
     fireEvent.keyDown(document.body, { key: 'f', ctrlKey: true });
 
     await waitFor(() => expect(store.getSnapshot().activePanel).toBe('source'));
-    expect(screen.queryByRole('dialog', { name: 'Command Palette' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
   });
 
   it('gives the canvas an accessible name and Escape clears selection while retaining focus', () => {
@@ -238,7 +238,7 @@ describe('workspace accessibility', () => {
     }],
     ['palette', async (user: ReturnType<typeof userEvent.setup>) => {
       await user.click(screen.getByRole('button', { name: 'Command Palette' }));
-      await user.click(screen.getByRole('option', { name: /^SaveFileCtrl\+S$/ }));
+      await user.click(screen.getByRole('option', { name: /^SaveCtrl\+S$/ }));
     }],
     ['shortcut', async () => {
       fireEvent.keyDown(document.body, { key: 's', ctrlKey: true });

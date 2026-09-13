@@ -156,14 +156,6 @@ const MENU_CANVAS_BASELINE = MENU_BASELINE
     "text='Quit &#x26; Save' />",
     "text='Quit &#x26; Save' style=\"position: absolute; left: 225px; top: 30px; width: 160px; height: 40px;\" />",
   );
-const MENU_CANVAS_AFTER_SNAP_MOVE = MENU_CANVAS_BASELINE.replace(
-  'left: 40px; top: 30px;',
-  'left: 45px; top: 30px;',
-);
-const MENU_CANVAS_AFTER_RESIZE = MENU_CANVAS_AFTER_SNAP_MOVE.replace(
-  'width: 160px; height: 40px;',
-  'width: 192px; height: 48px;',
-);
 const MENU_NUDGE_BASELINE = MENU_BASELINE
   .replace(
     'text="Main Menu" />',
@@ -185,10 +177,7 @@ const MENU_NUDGE_AFTER_ACCELERATED = MENU_NUDGE_AFTER_NORMAL.replace(
   'left: 161px; top: 60px;',
   'left: 161px; top: 70px;',
 );
-const MENU_NUDGE_AFTER_DISTRIBUTE = MENU_NUDGE_AFTER_ACCELERATED.replace(
-  'left: 161px; top: 70px;',
-  'left: 138.5px; top: 70px;',
-);
+
 const MENU_USS_AFTER_INSPECTOR_COLOR = MENU_USS_BASELINE.replace('#18794e', '#2563eb');
 const MENU_USS_AFTER_INSPECTOR_NEW_RULE = `${MENU_USS_AFTER_INSPECTOR_COLOR}\r\n#play-button {\r\n  opacity: 0.8;\r\n}\r\n`;
 const MENU_UXML_AFTER_INSPECTOR_INLINE = MENU_BASELINE.replace(
@@ -416,7 +405,7 @@ test('rejects an unavailable production clipboard read without mutating source b
   expect(await project(page, MENU)).toEqual(before);
 });
 
-test('refuses a canvas resize for a selection without absolute authored layout', async ({ page }) => {
+test('refuses invalid canvas move, resize, and nudge without mutating source or history', async ({ page }) => {
   await openMenu(page);
   const hierarchy = page.getByRole('tree', { name: 'Document hierarchy' });
   const play = hierarchy.getByRole('treeitem', { name: 'play-button' });
@@ -433,9 +422,21 @@ test('refuses a canvas resize for a selection without absolute authored layout',
   await page.mouse.down();
   await page.mouse.move(handle!.x + handle!.width / 2 + 12, handle!.y + handle!.height / 2 + 8);
   await page.mouse.up();
-
   await expect(page.locator('.canvas-interaction-status')).toContainText('Free movement requires computed position to be exactly absolute.');
+
+  // The keyboard move path refuses the same non-absolute selection.
+  const canvas = page.getByLabel('Canvas editing area');
+  await canvas.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.canvas-interaction-status')).toContainText('Free movement requires computed position to be exactly absolute.');
+
+  // Byte-exact: the refused gestures left every buffer untouched, including
+  // line endings — and neither produced an undoable history entry.
+  await expectUnsavedSource(page, MENU_UXML, MENU_BASELINE);
+  await expectUnsavedSource(page, MENU_USS, MENU_USS_BASELINE);
   await expectVisibleSource(page, MENU_UXML, MENU_BASELINE);
+  await expectPaletteCommand(page, 'Undo', false);
+  await expectPaletteCommand(page, 'Redo', false);
   expect(await project(page, MENU)).toEqual(await baseline(page, MENU));
 });
 
@@ -455,13 +456,29 @@ test('authors one snapped pointer move and one pointer resize as individually un
     "text='Quit &#x26; Save' />",
     "text='Quit &#x26; Save' style=\"position: absolute; left: 225px; top: 30px; width: 160px; height: 40px;\" />",
   );
+  await expectUnsavedSource(page, MENU_UXML, MENU_CANVAS_BASELINE);
   await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_BASELINE);
 
   const hierarchy = page.getByRole('tree', { name: 'Document hierarchy' });
+  const title = hierarchy.getByRole('treeitem', { name: 'menu-title' });
   const play = hierarchy.getByRole('treeitem', { name: 'play-button' });
+  const quit = hierarchy.getByRole('treeitem', { name: 'quit-button' });
+  const zoom = await canvasZoom(page);
+
+  // Measure the inputs the snap algorithm consumes — every sibling box and the
+  // parent box through each one's own selection overlay — then derive the
+  // expected write instead of copying captured output into the oracle.
+  await title.focus();
+  await page.keyboard.press('Enter');
+  const titleBox = await selectedBounds(page, 'selected-bounds');
+  await quit.focus();
+  await page.keyboard.press('Enter');
+  const quitBox = await selectedBounds(page, 'selected-bounds');
   await play.focus();
   await page.keyboard.press('Enter');
   await expectStructuralSelection(page, play, 'ui:Button');
+  const playBox = await selectedBounds(page, 'selected-bounds');
+  const parentBox = await selectedBounds(page, 'selected-parent-bounds');
   const target = page.getByTestId('canvas-renderer').getByText('Play & Go', { exact: true });
   await expect(target).toBeVisible();
   const targetBox = await target.boundingBox();
@@ -472,11 +489,25 @@ test('authors one snapped pointer move and one pointer resize as individually un
   await page.mouse.move(targetBox!.x + 22, targetBox!.y + 20);
   await expect(page.locator('.canvas-snap-guide')).toHaveCount(2);
   await page.mouse.up();
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_AFTER_SNAP_MOVE);
+  const moved = expectedSnapMove({
+    box: playBox,
+    targets: [parentBox, titleBox, quitBox],
+    dragX: 2,
+    dragY: 0,
+    authoredLeft: 40,
+    authoredTop: 30,
+    zoom,
+  });
+  const afterMove = MENU_CANVAS_BASELINE.replace(
+    'left: 40px; top: 30px;',
+    `left: ${formatPixels(moved.left)}; top: ${formatPixels(moved.top)};`,
+  );
+  await expectUnsavedSource(page, MENU_UXML, afterMove);
+  await expectVisibleSource(page, MENU_UXML, afterMove);
   await runPaletteCommand(page, 'Undo');
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_BASELINE);
+  await expectUnsavedSource(page, MENU_UXML, MENU_CANVAS_BASELINE);
   await runPaletteCommand(page, 'Redo');
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_AFTER_SNAP_MOVE);
+  await expectUnsavedSource(page, MENU_UXML, afterMove);
 
   const resize = page.getByRole('button', { name: 'Resize selection' });
   await expect(resize).toBeVisible();
@@ -486,16 +517,21 @@ test('authors one snapped pointer move and one pointer resize as individually un
   await page.mouse.down();
   await page.mouse.move(resizeBox!.x + resizeBox!.width / 2 + 12, resizeBox!.y + resizeBox!.height / 2 + 8);
   await page.mouse.up();
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_AFTER_RESIZE);
+  const afterResize = afterMove.replace(
+    'width: 160px; height: 40px;',
+    `width: ${formatPixels((playBox.width + 12) / zoom)}; height: ${formatPixels((playBox.height + 8) / zoom)};`,
+  );
+  await expectUnsavedSource(page, MENU_UXML, afterResize);
+  await expectVisibleSource(page, MENU_UXML, afterResize);
   await runPaletteCommand(page, 'Undo');
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_AFTER_SNAP_MOVE);
+  await expectUnsavedSource(page, MENU_UXML, afterMove);
   await runPaletteCommand(page, 'Redo');
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_AFTER_RESIZE);
+  await expectUnsavedSource(page, MENU_UXML, afterResize);
   await expectStructuralSelection(page, play, 'ui:Button');
   await page.getByRole('button', { name: 'Save' }).click();
   await settled(page);
   const saved = await project(page, MENU);
-  expect(saved.files[MENU_UXML]?.text).toBe(MENU_CANVAS_AFTER_RESIZE);
+  expect(saved.files[MENU_UXML]?.text).toBe(afterResize);
   expect(saved.files[MENU_UXML]?.revision).not.toBe(before.files[MENU_UXML]?.revision);
   expect(saved.files[MENU_USS]?.text).toBe(MENU_USS_BASELINE);
   await runPaletteCommand(page, 'Close Project');
@@ -503,7 +539,7 @@ test('authors one snapped pointer move and one pointer resize as individually un
   await runPaletteCommand(page, 'Reopen Project');
   await expectOpenProject(page, 'Menu Fixture');
   expect(await project(page, MENU)).toEqual(saved);
-  await expectVisibleSource(page, MENU_UXML, MENU_CANVAS_AFTER_RESIZE);
+  await expectVisibleSource(page, MENU_UXML, afterResize);
 });
 
 test('nudges with normal and accelerated steps, then distributes a real three-element canvas selection', async ({ page }) => {
@@ -527,6 +563,7 @@ test('nudges with normal and accelerated steps, then distributes a real three-el
     "text='Quit &#x26; Save' />",
     "text='Quit &#x26; Save' style=\"position: absolute; left: 340px; top: 120px; width: 160px; height: 40px;\" />",
   );
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_BASELINE);
   await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_BASELINE);
 
   const hierarchy = page.getByRole('tree', { name: 'Document hierarchy' });
@@ -539,14 +576,51 @@ test('nudges with normal and accelerated steps, then distributes a real three-el
   const canvas = page.getByLabel('Canvas editing area');
   await canvas.focus();
   await page.keyboard.press('ArrowRight');
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_NORMAL);
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_AFTER_NORMAL);
+  // The normal nudge is its own history entry: one undo returns to the exact
+  // authored baseline and one redo replays it — it is not coalesced into the
+  // accelerated step that follows.
+  await runPaletteCommand(page, 'Undo');
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_BASELINE);
+  await runPaletteCommand(page, 'Redo');
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_AFTER_NORMAL);
   await canvas.focus();
   await page.keyboard.press('Shift+ArrowDown');
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_ACCELERATED);
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_AFTER_ACCELERATED);
   await runPaletteCommand(page, 'Undo');
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_NORMAL);
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_AFTER_NORMAL);
   await runPaletteCommand(page, 'Redo');
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_ACCELERATED);
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_AFTER_ACCELERATED);
+
+  // Derive the distribution write from the rendered boxes the command reads:
+  // the middle element's new left is authoredLeft + (cursor - observedLeft),
+  // where cursor is firstBox.right + the equalized gap in frame space.
+  const zoom = await canvasZoom(page);
+  await title.focus();
+  await page.keyboard.press('Enter');
+  const titleBox = await selectedBounds(page, 'selected-bounds');
+  await play.focus();
+  await page.keyboard.press('Enter');
+  const playBox = await selectedBounds(page, 'selected-bounds');
+  await quit.focus();
+  await page.keyboard.press('Enter');
+  const quitBox = await selectedBounds(page, 'selected-bounds');
+  const authoredByBox = new Map<MeasuredBox, number>([
+    [titleBox, 40],
+    [playBox, 161],
+    [quitBox, 340],
+  ]);
+  const sorted = [titleBox, playBox, quitBox].sort((left, right) => left.left - right.left);
+  const gap = (sorted[2].left + sorted[2].width - sorted[0].left
+    - sorted.reduce((total, box) => total + box.width, 0)) / (sorted.length - 1);
+  const middle = sorted[1];
+  const cursor = sorted[0].left + sorted[0].width + gap;
+  const middleAuthored = authoredByBox.get(middle)!;
+  const middleLeft = middleAuthored + (cursor - middle.left) / zoom;
+  const distributed = MENU_NUDGE_AFTER_ACCELERATED.replace(
+    `left: ${middleAuthored}px;`,
+    `left: ${formatPixels(middleLeft)};`,
+  );
 
   await title.focus();
   await page.keyboard.press('Enter');
@@ -560,11 +634,12 @@ test('nudges with normal and accelerated steps, then distributes a real three-el
   const distribute = page.getByRole('button', { name: 'Distribute horizontally' });
   await expect(distribute).toBeEnabled();
   await distribute.click();
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_DISTRIBUTE);
+  await expectUnsavedSource(page, MENU_UXML, distributed);
+  await expectVisibleSource(page, MENU_UXML, distributed);
   await runPaletteCommand(page, 'Undo');
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_ACCELERATED);
+  await expectUnsavedSource(page, MENU_UXML, MENU_NUDGE_AFTER_ACCELERATED);
   await runPaletteCommand(page, 'Redo');
-  await expectVisibleSource(page, MENU_UXML, MENU_NUDGE_AFTER_DISTRIBUTE);
+  await expectUnsavedSource(page, MENU_UXML, distributed);
   await expect(page.getByLabel('Inspector selection context')).toContainText('3 elements');
 });
 
@@ -644,7 +719,19 @@ test('authors inspector values through existing-rule, inline, and new-rule desti
   await colorMenu.getByRole('menuitem', { name: 'Menu.uss · .menu-button.primary' }).click();
   await showSource(page, MENU_UXML);
   await page.getByRole('combobox', { name: 'Source file' }).selectOption(MENU_USS);
+  await expectUnsavedSource(page, MENU_USS, MENU_USS_AFTER_INSPECTOR_COLOR);
   await expectVisibleSource(page, MENU_USS, MENU_USS_AFTER_INSPECTOR_COLOR);
+
+  // An invalid color commits nothing: the field reports the error, the buffer
+  // keeps its exact bytes, and no write-target menu or history entry appears.
+  await background.fill('not-a-color');
+  await background.press('Enter');
+  await expect(background).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByRole('menu', { name: 'Write background-color to' })).toHaveCount(0);
+  await expectUnsavedSource(page, MENU_USS, MENU_USS_AFTER_INSPECTOR_COLOR);
+  await background.fill('#2563eb');
+  await background.press('Enter');
+  await expect(background).toHaveAttribute('aria-invalid', 'false');
 
   const width = page.getByRole('textbox', { name: 'Width', exact: true });
   await width.fill('240px');
@@ -699,6 +786,73 @@ test('authors inspector values through existing-rule, inline, and new-rule desti
   await expectVisibleSource(page, MENU_UXML, MENU_UXML_AFTER_INSPECTOR_BOX_ALIGNMENT);
   await page.getByRole('combobox', { name: 'Source file' }).selectOption(MENU_USS);
   await expectVisibleSource(page, MENU_USS, MENU_USS_AFTER_INSPECTOR_NEW_RULE);
+});
+
+test('shows each text-bearing element its own text and restricts a mixed multi-edit to shared write targets', async ({ page }) => {
+  await openMenu(page);
+  const hierarchy = page.getByRole('tree', { name: 'Document hierarchy' });
+  const title = hierarchy.getByRole('treeitem', { name: 'menu-title' });
+  const play = hierarchy.getByRole('treeitem', { name: 'play-button' });
+  const quit = hierarchy.getByRole('treeitem', { name: 'quit-button' });
+  const text = page.getByRole('textbox', { name: 'Text' });
+
+  // Distinct text-bearing elements each report their own authored value,
+  // verbatim — entity references are preserved, not decoded.
+  await title.focus();
+  await page.keyboard.press('Enter');
+  await expect(text).toHaveValue('Main Menu');
+  await play.focus();
+  await page.keyboard.press('Enter');
+  await expect(text).toHaveValue('Play &amp; Go');
+  await quit.focus();
+  await page.keyboard.press('Enter');
+  await expect(text).toHaveValue('Quit &#x26; Save');
+
+  // A mixed selection degrades honestly: no element's text is presented as the
+  // group's, and an explicit commit writes every selected element's attribute.
+  await title.focus();
+  await page.keyboard.press('Enter');
+  await play.focus();
+  await page.keyboard.press('Control+Enter');
+  await expect(page.getByLabel('Inspector selection context')).toContainText('2 elements');
+  await expect(text).toHaveValue('');
+  await expect(text).toHaveAttribute('placeholder', 'Mixed');
+  await text.fill('Shared caption');
+  await text.press('Enter');
+  const sharedText = MENU_BASELINE
+    .replace('text="Main Menu"', 'text="Shared caption"')
+    .replace('text="Play &amp; Go"', 'text="Shared caption"');
+  await expectUnsavedSource(page, MENU_UXML, sharedText);
+  await runPaletteCommand(page, 'Undo');
+  await expectUnsavedSource(page, MENU_UXML, MENU_BASELINE);
+
+  // Mixed style provenance: play's background comes from .menu-button.primary
+  // while quit has none — the field shows Mixed and the write menu only offers
+  // destinations both elements share, never a partial write to primary alone.
+  await play.focus();
+  await page.keyboard.press('Enter');
+  await quit.focus();
+  await page.keyboard.press('Control+Enter');
+  await expect(page.getByLabel('Inspector selection context')).toContainText('2 elements');
+  const background = page.getByRole('textbox', { name: 'Background color' });
+  await expect(background).toHaveValue('');
+  await expect(background).toHaveAttribute('placeholder', 'Mixed');
+  await background.fill('#123456');
+  await background.press('Enter');
+  const writeMenu = page.getByRole('menu', { name: 'Write background-color to' });
+  await expect(writeMenu).toBeVisible();
+  await expect(writeMenu.getByRole('menuitem', { name: 'Inline style' })).toBeVisible();
+  await expect(writeMenu.getByRole('menuitem', { name: 'New rules: Menu.uss · 2 selectors' })).toBeVisible();
+  await expect(writeMenu.getByRole('menuitem', { name: /\.menu-button\.primary/ })).toHaveCount(0);
+  await writeMenu.getByRole('menuitem', { name: 'New rules: Menu.uss · 2 selectors' }).click();
+
+  // One localized append per selector, in selection order, preserving the
+  // sheet's CRLF style — and a single undo removes the whole composed edit.
+  const appended = '\r\n#play-button {\r\n  background-color: #123456;\r\n}\r\n\r\n#quit-button {\r\n  background-color: #123456;\r\n}\r\n';
+  await expectUnsavedSource(page, MENU_USS, `${MENU_USS_BASELINE}${appended}`);
+  await expectUnsavedSource(page, MENU_UXML, MENU_BASELINE);
+  await runPaletteCommand(page, 'Undo');
+  await expectUnsavedSource(page, MENU_USS, MENU_USS_BASELINE);
 });
 
 test('authors typed inspector attributes and class tokens, then persists an explicit mixed multi-edit', async ({ page }) => {
@@ -789,26 +943,65 @@ test('authors typed inspector attributes and class tokens, then persists an expl
   await expect(page.getByRole('textbox', { name: 'Classes' })).toHaveValue('shared-icon');
 });
 
-test('adds, removes, and reorders USS declarations through the visible source editor without disturbing imports', async ({ page }) => {
+test('adds, removes, and reorders USS declarations through localized source edits without disturbing imports', async ({ page }) => {
   await openEditor(page);
   await selectProject(page, NESTED_STYLES);
   await page.getByRole('button', { name: 'Open Project' }).click();
   await settled(page);
   await expectOpenProject(page, 'Nested Styles Fixture');
+  const before = await project(page, NESTED_STYLES);
   await showSource(page, NESTED_UXML);
   await expectVisibleSource(page, NESTED_UXML, NESTED_UXML_BASELINE);
   await page.getByRole('combobox', { name: 'Source file' }).selectOption(NESTED_BASE_USS);
-  await sourceEditor(page, NESTED_BASE_USS).fill(NESTED_BASE_USS_AFTER_ADD);
+  await expect(sourceEditor(page, NESTED_BASE_USS)).toBeVisible();
+  await expectUnsavedSource(page, NESTED_BASE_USS, NESTED_BASE_USS_BASELINE);
+
+  // Localized add: caret on the background-color line, End to the line end,
+  // Enter and the new declaration text. Nothing else in the buffer is touched.
+  await clickSourceLine(page, NESTED_BASE_USS, 'background-color: #e7eef6;');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('margin-left: 8px;');
   await drainSourceCallbacks(page);
-  await expectVisibleSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_ADD);
-  await sourceEditor(page, NESTED_BASE_USS).fill(NESTED_BASE_USS_AFTER_REMOVE);
+  await expectUnsavedSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_ADD);
+  await expectUnsavedSource(page, NESTED_BUTTONS_USS, NESTED_BUTTONS_USS_BASELINE);
+
+  // Localized remove: the editor's delete-line command drops the declaration
+  // and its line break, leaving every other declaration byte-identical.
+  await clickSourceLine(page, NESTED_BASE_USS, 'padding: 20px;');
+  await page.keyboard.press('Control+Shift+K');
   await drainSourceCallbacks(page);
-  await expectVisibleSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_REMOVE);
-  await sourceEditor(page, NESTED_BASE_USS).fill(NESTED_BASE_USS_AFTER_REORDER);
+  await expectUnsavedSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_REMOVE);
+
+  // Localized reorder: the editor's line-move command lifts the declaration
+  // above its sibling without touching the import, comments, or other rules.
+  await clickSourceLine(page, NESTED_BASE_USS, 'margin-left: 8px;');
+  await page.keyboard.press('Alt+ArrowUp');
   await drainSourceCallbacks(page);
-  await expectVisibleSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_REORDER);
+  await expectUnsavedSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_REORDER);
+  await expectUnsavedSource(page, NESTED_UXML, NESTED_UXML_BASELINE);
+  await expectUnsavedSource(page, NESTED_BUTTONS_USS, NESTED_BUTTONS_USS_BASELINE);
   await page.getByRole('combobox', { name: 'Source file' }).selectOption(NESTED_BUTTONS_USS);
   await expectVisibleSource(page, NESTED_BUTTONS_USS, NESTED_BUTTONS_USS_BASELINE);
+
+  // Authored USS persistence: Save, close, and reopen must carry the exact
+  // edited base.uss bytes while the imported buttons.uss stays untouched.
+  await page.getByRole('button', { name: 'Save' }).click();
+  await settled(page);
+  const saved = await project(page, NESTED_STYLES);
+  expect(saved.files[NESTED_BASE_USS]?.text).toBe(NESTED_BASE_USS_AFTER_REORDER);
+  expect(saved.files[NESTED_BASE_USS]?.text ?? '').not.toContain('\r');
+  expect(saved.files[NESTED_BUTTONS_USS]).toEqual(before.files[NESTED_BUTTONS_USS]);
+  expect(saved.files[NESTED_UXML]?.text).toBe(NESTED_UXML_BASELINE);
+  await runPaletteCommand(page, 'Close Project');
+  await expectClosedProject(page);
+  await runPaletteCommand(page, 'Reopen Project');
+  await expectOpenProject(page, 'Nested Styles Fixture');
+  expect(await project(page, NESTED_STYLES)).toEqual(saved);
+  await expectUnsavedSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_REORDER);
+  await showSource(page, NESTED_UXML);
+  await page.getByRole('combobox', { name: 'Source file' }).selectOption(NESTED_BASE_USS);
+  await expectVisibleSource(page, NESTED_BASE_USS, NESTED_BASE_USS_AFTER_REORDER);
 });
 
 test('authors structure through palette, hierarchy, canvas, source, and pointer controls', async ({ page }) => {
@@ -1279,6 +1472,7 @@ interface EditorFixtureBridge {
       pending: number;
     }>[];
   }>;
+  unsavedText(path: string): string | null;
 }
 
 async function openEditor(page: Page): Promise<void> {
@@ -1309,7 +1503,7 @@ async function expectClosedProject(page: Page): Promise<void> {
 
 async function runPaletteCommand(page: Page, label: string): Promise<void> {
   await page.getByRole('button', { name: 'Command Palette' }).click();
-  const palette = page.getByRole('dialog', { name: 'Command Palette' });
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
   await palette.getByRole('searchbox', { name: 'Search commands' }).fill(label);
   await palette.getByRole('option', { name: new RegExp(`^${escapeRegex(label)}\\b`) }).click();
   await settled(page);
@@ -1317,7 +1511,7 @@ async function runPaletteCommand(page: Page, label: string): Promise<void> {
 
 async function expectPaletteCommand(page: Page, label: string, enabled: boolean): Promise<void> {
   await page.getByRole('button', { name: 'Command Palette' }).click();
-  const palette = page.getByRole('dialog', { name: 'Command Palette' });
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
   await palette.getByRole('searchbox', { name: 'Search commands' }).fill(label);
   const option = palette.getByRole('option', { name: new RegExp(`^${escapeRegex(label)}\\b`) });
   if (enabled) await expect(option).toBeEnabled();
@@ -1490,6 +1684,106 @@ async function runtimeState(page: Page) {
   return page.evaluate(() => (window as typeof window & {
     __task17a2a: EditorFixtureBridge;
   }).__task17a2a.runtimeState());
+}
+
+// Byte-exact assertion on the authoritative unsaved session buffer — the text a
+// Save would write, including authored line endings. Unlike visibleSourceText
+// (which reads CodeMirror's necessarily-LF DOM), this detects any CRLF/LF drift.
+async function expectUnsavedSource(page: Page, path: string, expected: string): Promise<void> {
+  const actual = await page.evaluate((value) => (window as typeof window & {
+    __task17a2a: EditorFixtureBridge;
+  }).__task17a2a.unsavedText(value), path);
+  expect(actual).toBe(expected);
+}
+
+// Localized CodeMirror authoring: click the visible line containing `text` to
+// place the caret there, then keep editing through keyboard commands (End,
+// Enter, line move/delete). Only the touched range is replaced — never a
+// whole-buffer write.
+async function clickSourceLine(page: Page, path: string, text: string): Promise<void> {
+  await sourceEditor(page, path).locator('.cm-line', { hasText: text }).click();
+}
+
+interface MeasuredBox {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+// Frame boxes are rendered inside the canvas transform; at a uniform zoom every
+// measurement shares the same offset and scale, so relative distances are the
+// frame-space values multiplied by zoom.
+async function selectedBounds(page: Page, testId: 'selected-bounds' | 'selected-parent-bounds'): Promise<MeasuredBox> {
+  const box = await page.getByTestId(testId).boundingBox();
+  if (box === null) throw new Error(`${testId} is not rendered.`);
+  return { left: box.x, top: box.y, width: box.width, height: box.height };
+}
+
+async function canvasZoom(page: Page): Promise<number> {
+  const style = await page.getByTestId('canvas-transform').getAttribute('style');
+  const match = /scale\(([\d.eE+-]+)\)/.exec(style ?? '');
+  if (match === null) throw new Error(`Canvas transform has no scale component: ${style}`);
+  const zoom = Number(match[1]);
+  if (!Number.isFinite(zoom) || zoom <= 0) throw new Error(`Unreadable canvas zoom: ${style}`);
+  return zoom;
+}
+
+// Independent derivation of the snap-move oracle: the production rule is
+// "closest sibling/parent edge within 5 frame px of the requested position's
+// left/center/right edges wins" (ManipulationController.snapPosition). The
+// expected authored value is computed from measured boxes, not captured output.
+function expectedSnapMove(options: {
+  readonly box: MeasuredBox;
+  readonly targets: readonly MeasuredBox[];
+  readonly dragX: number;
+  readonly dragY: number;
+  readonly authoredLeft: number;
+  readonly authoredTop: number;
+  readonly zoom: number;
+}): { left: number; top: number } {
+  const closest = (moving: readonly number[], targets: readonly number[]): number => {
+    let best: { delta: number; target: number } | null = null;
+    for (const from of moving) {
+      for (const target of targets) {
+        const delta = target - from;
+        if (Math.abs(delta) > 5 * options.zoom) continue;
+        if (best === null || Math.abs(delta) < Math.abs(best.delta)
+          || (Math.abs(delta) === Math.abs(best.delta) && target < best.target)) {
+          best = { delta, target };
+        }
+      }
+    }
+    return best?.delta ?? 0;
+  };
+  const edges = options.targets.flatMap((target) => ({
+    x: [target.left, target.left + target.width / 2, target.left + target.width],
+    y: [target.top, target.top + target.height / 2, target.top + target.height],
+  }));
+  const targetX = edges.flatMap((edge) => edge.x);
+  const targetY = edges.flatMap((edge) => edge.y);
+  const requestedX = options.box.left + options.dragX;
+  const requestedY = options.box.top + options.dragY;
+  const snappedX = requestedX + closest(
+    [requestedX, requestedX + options.box.width / 2, requestedX + options.box.width],
+    targetX,
+  );
+  const snappedY = requestedY + closest(
+    [requestedY, requestedY + options.box.height / 2, requestedY + options.box.height],
+    targetY,
+  );
+  return {
+    left: options.authoredLeft + (snappedX - options.box.left) / options.zoom,
+    top: options.authoredTop + (snappedY - options.box.top) / options.zoom,
+  };
+}
+
+// Mirrors layoutStyleWritePlanner.formatNumber: -0 normalizes to 0, values are
+// rounded to 3 decimals — the exact string the authored declaration receives.
+function formatPixels(value: number): string {
+  if (!Number.isFinite(value)) throw new Error(`Cannot derive a pixel oracle from ${value}.`);
+  const normalized = Object.is(value, -0) ? 0 : Math.round(value * 1000) / 1000;
+  return `${normalized}px`;
 }
 
 function overwriteConfirmation(count: number) {

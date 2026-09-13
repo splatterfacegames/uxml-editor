@@ -153,7 +153,9 @@ export function Workbench({ store, registry, workflow, ui, sourceEditScheduler }
             onBottomViewActivate={activatePanel}
             setPaneRef={(panel, element) => { desktopPanes.current[panel] = element; }}
           />}
-      {registry !== undefined && ui !== undefined && uiSnapshot.commandPaletteOpen && (
+      {/* The shared palette must stay mounted across open→close transitions:
+          its own effect restores focus to the opener when open flips false. */}
+      {registry !== undefined && ui !== undefined && (
         <CommandPalette registry={registry} ui={ui} />
       )}
       {workflow !== undefined && <ExternalChangeDialog workflow={workflow} />}

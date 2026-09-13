@@ -48,16 +48,28 @@ function licenseOf(manifest) {
 }
 
 function productionPackagePaths() {
-  const stdout = execFileSync('npm', ['ls', '--all', '--omit=dev', '--parseable'], {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  // On Windows npm is a .cmd shim, so route through cmd.exe instead of a bare
+  // spawn (which cannot execute .cmd) or shell:true (deprecated arg concat).
+  const windows = process.platform === 'win32';
+  const stdout = execFileSync(
+    windows ? (process.env.ComSpec ?? 'cmd.exe') : 'npm',
+    windows ? ['/d', '/s', '/c', 'npm', 'ls', '--all', '--omit=dev', '--parseable'] : ['ls', '--all', '--omit=dev', '--parseable'],
+    {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   return stdout
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.includes('node_modules'));
 }
+
+// First-party private packages in the splatterfacegames org ship no license
+// field; they are not third-party redistribution. Everything else must carry
+// an allowlisted license.
+const FIRST_PARTY_PACKAGES = new Set(['@jethac/tools-frontend-stack']);
 
 const violations = [];
 for (const packagePath of productionPackagePaths()) {
@@ -69,6 +81,7 @@ for (const packagePath of productionPackagePaths()) {
     violations.push(`${relative(repositoryRoot, manifestPath)}: unreadable (${error.message})`);
     continue;
   }
+  if (FIRST_PARTY_PACKAGES.has(manifest.name)) continue;
   const license = licenseOf(manifest);
   const name = `${manifest.name ?? relative(repositoryRoot, packagePath)}@${manifest.version ?? 'unknown'}`;
   if (license === null) {
