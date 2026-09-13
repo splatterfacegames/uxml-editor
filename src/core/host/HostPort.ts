@@ -79,6 +79,12 @@ export type DisposalOutcome =
 
 export interface HostPort {
   readonly capabilities: HostCapabilities;
+  /**
+   * Desktop hosts may receive a project path on the command line (`--open`
+   * or a bare directory argument). The frontend claims it exactly once; later
+   * calls return null. Hosts without launch arguments leave this undefined.
+   */
+  initialProject?(): Promise<ProjectRoot | null>;
   chooseProject(): Promise<ProjectRoot | null>;
   enumerateFiles(root: ProjectRoot): Promise<FileEnumerationResult>;
   readText(path: ProjectPath): Promise<FileReadResult>;

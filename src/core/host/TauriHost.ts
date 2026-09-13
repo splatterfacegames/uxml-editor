@@ -63,9 +63,19 @@ export class TauriHost implements HostPort {
     return this.capabilitySnapshot;
   }
 
+  async initialProject(): Promise<ProjectRoot | null> {
+    const result = await this.invoke('host_take_initial_project', undefined, 'selection-failed');
+    if (result === null) return null;
+    return this.adoptProjectSelection(result);
+  }
+
   async chooseProject(): Promise<ProjectRoot | null> {
     const result = await this.invoke('host_choose_project', undefined, 'selection-failed');
     if (result === null) return null;
+    return this.adoptProjectSelection(result);
+  }
+
+  private async adoptProjectSelection(result: unknown): Promise<ProjectRoot> {
     if (!isExactRecord(result, ['projectId', 'displayName', 'grant', 'atomicReplace'])
       || !isNativeProjectId(result.projectId)
       || !isNativeGrant(result.grant)

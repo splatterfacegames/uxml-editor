@@ -1,5 +1,11 @@
 # Progress
 
+> **Historical ledger.** This file records the per-task build evidence as it
+> stood when each entry was written (the engine pin was 0.4.0 then). For the
+> current pin, fidelity limits, and release state see
+> [`vendor/uxml-preview/PROVENANCE.md`](../vendor/uxml-preview/PROVENANCE.md),
+> [`docs/compatibility.md`](compatibility.md), and [`CHANGELOG.md`](../CHANGELOG.md).
+
 ## Current Status
 
 Tasks 1 through 7 are complete. The editor core now includes exact source

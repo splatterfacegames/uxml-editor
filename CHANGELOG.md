@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `--open <project-dir>` (or a bare directory argument) opens a Unity project
+  on launch. The native host claims the path once through
+  `host_take_initial_project`; the frontend opens it through the normal file
+  workflow.
+- `UXML_EDITOR_CDP_PORT` opts the main window's WebView2 into Chrome DevTools
+  Protocol remote debugging for that launch only — the packaged workflow smoke
+  test drives the real UI over it.
+- `scripts/smoke-packaged-app.mjs` (`npm run smoke:packaged:app`) launches the
+  built executable, attaches over CDP, and verifies a real
+  open → clean-save byte-identical → inspector edit → localized write →
+  relaunch cycle against files on disk.
+
+### Changed
+
+- The main window is constructed in `run()` instead of `tauri.conf.json` so
+  WebView2 browser arguments can be opted into per launch; its label, title,
+  and size are unchanged.
+
 ## [0.1.0] - 2026-09-13
 
 ### Added

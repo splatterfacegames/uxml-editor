@@ -268,6 +268,35 @@ describe('TauriHost IPC validation and serialization', () => {
     }
   });
 
+  it('claims the launch-argument project exactly once through host_take_initial_project', async () => {
+    const calls: string[] = [];
+    const host = new TauriHost({
+      invoke: async (command) => {
+        calls.push(command);
+        if (command === 'host_take_initial_project') {
+          return calls.filter((c) => c === 'host_take_initial_project').length === 1
+            ? { projectId: NATIVE_PROJECT_B, displayName: 'Launch Project', grant: NATIVE_GRANT_B, atomicReplace: NATIVE_ATOMIC_REPLACE }
+            : null;
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+      listen: async () => () => undefined,
+      timers: new FakeTimers(0),
+    });
+
+    const first = await host.initialProject!();
+    expect(first).toEqual({ id: NATIVE_PROJECT_B, name: 'Launch Project' });
+    expect(Object.isFrozen(first)).toBe(true);
+    await expect(host.initialProject!()).resolves.toBeNull();
+
+    const malformed = new TauriHost({
+      invoke: async () => ({ projectId: NATIVE_PROJECT_B, displayName: 'Launch Project' }),
+      listen: async () => () => undefined,
+      timers: new FakeTimers(0),
+    });
+    await expect(malformed.initialProject!()).rejects.toMatchObject({ code: 'selection-failed' });
+  });
+
   it('validates grant-scoped watch events and reports native stop failure after synchronous disposal', async () => {
     let nativeListener: ((event: TauriEvent<unknown>) => void | Promise<void>) | undefined;
     const host = new TauriHost({
@@ -588,7 +617,7 @@ describe('TauriHost IPC validation and serialization', () => {
       revision: NATIVE_REVISION_A,
     } });
     await started;
-    for (let attempt = 0; attempt < 5 && !replacementSettled; attempt += 1) await Promise.resolve();
+    for (let attempt = 0; attempt < 64 && !replacementSettled; attempt += 1) await Promise.resolve();
 
     expect(replacementSettled).toBe(true);
   });
@@ -1011,6 +1040,7 @@ class FakeTauriBridge {
   private readonly eventListeners = new Map<string, Set<(event: TauriEvent<unknown>) => void | Promise<void>>>();
   private sequence = 0;
   private revisionSequence = 0;
+  private initialProjectPending = true;
   private readonly readNow: () => number;
 
   constructor(readNow: () => number) {
@@ -1059,6 +1089,10 @@ class FakeTauriBridge {
     switch (command) {
       case 'host_choose_project':
         return { projectId: NATIVE_PROJECT_A, displayName: 'Chosen Project', grant: NATIVE_GRANT_A, atomicReplace: NATIVE_ATOMIC_REPLACE };
+      case 'host_take_initial_project':
+        if (!this.initialProjectPending) return null;
+        this.initialProjectPending = false;
+        return { projectId: NATIVE_PROJECT_B, displayName: 'Launch Project', grant: NATIVE_GRANT_B, atomicReplace: NATIVE_ATOMIC_REPLACE };
       case 'host_enumerate_files':
         this.requireGranted(request);
         return { relativePaths: [...this.files.keys()].sort() };

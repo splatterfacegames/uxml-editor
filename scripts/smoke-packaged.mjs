@@ -14,6 +14,9 @@
  *      SHA-256 manifest next to them verifies;
  *   4. the binary exits promptly — a hang here means a launch failure.
  *
+ * For the deeper UI-level proof (launch → open project → edit → save →
+ * relaunch over WebView2 CDP), run `npm run smoke:packaged:app` on Windows.
+ *
  * Usage: node scripts/smoke-packaged.mjs [target-dir]
  *   target-dir defaults to src-tauri/target/release
  */

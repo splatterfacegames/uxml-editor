@@ -107,6 +107,18 @@ export function App({ store, desktop, task16FileLifecycle, sourceEditScheduler }
     });
   }, [ownedFileWorkflow]);
 
+  const initialProjectRequested = useRef(false);
+  useEffect(() => {
+    if (initialProjectRequested.current || fileWorkflow === null || host === null) return;
+    if (typeof host.initialProject !== 'function') return;
+    initialProjectRequested.current = true;
+    void host.initialProject()
+      .then((root) => root === null ? undefined : fileWorkflow.openProject(root))
+      .catch((error) => {
+        latestDesktopErrors.current?.report(error);
+      });
+  }, [fileWorkflow, host]);
+
   useEffect(() => {
     const updateViewport = () => {
       const viewport = readBrowserViewport();
