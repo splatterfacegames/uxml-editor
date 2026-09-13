@@ -160,6 +160,7 @@ pub struct HostState {
     projects: ScopedProjects,
     app_data: AppDataStore,
     project_session: Mutex<()>,
+    initial_project: Mutex<Option<PathBuf>>,
     pub watches: WatchRegistry,
     pub close_gate: CloseGate,
     pub file_workflow_gate: FileWorkflowGate,
@@ -171,9 +172,29 @@ impl HostState {
             projects: ScopedProjects::default(),
             app_data: AppDataStore::new(app_data_root),
             project_session: Mutex::new(()),
+            initial_project: Mutex::new(None),
             watches: WatchRegistry::default(),
             close_gate: CloseGate::default(),
             file_workflow_gate: FileWorkflowGate::default(),
+        }
+    }
+
+    pub fn with_initial_project(mut self, path: Option<PathBuf>) -> Self {
+        self.initial_project = Mutex::new(path);
+        self
+    }
+
+    pub fn take_initial_project(&self) -> Result<Option<ProjectRootDto>, HostError> {
+        let pending = self
+            .initial_project
+            .lock()
+            .map_err(|_| {
+                HostError::new("selection-failed", "Initial project state is unavailable.")
+            })?
+            .take();
+        match pending {
+            Some(path) => self.select_project(&path).map(Some),
+            None => Ok(None),
         }
     }
 
@@ -618,6 +639,40 @@ mod tests {
                 .relative_paths,
             ["Main.uxml"]
         );
+    }
+
+    #[test]
+    fn initial_project_is_granted_once_and_consumed() {
+        let fixture = Fixture::new();
+        fixture.write("Main.uxml", b"first");
+        let state = HostState::new(fixture.root.join("app-data"))
+            .with_initial_project(Some(fixture.project.clone()));
+
+        let granted = state.take_initial_project().unwrap().unwrap();
+        assert!(!granted.project_id.is_empty());
+        assert!(!granted.grant.is_empty());
+        assert!(state.take_initial_project().unwrap().is_none());
+        assert_eq!(
+            state
+                .enumerate(&GrantedProjectRequest {
+                    project_id: granted.project_id,
+                    grant: granted.grant,
+                })
+                .unwrap()
+                .relative_paths,
+            ["Main.uxml"]
+        );
+    }
+
+    #[test]
+    fn initial_project_errors_on_a_missing_directory() {
+        let fixture = Fixture::new();
+        let state = HostState::new(fixture.root.join("app-data"))
+            .with_initial_project(Some(fixture.root.join("missing-project")));
+
+        let error = state.take_initial_project().unwrap_err();
+        assert_eq!(error.code, "selection-failed");
+        assert!(state.take_initial_project().unwrap().is_none());
     }
 
     #[test]

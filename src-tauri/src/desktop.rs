@@ -592,13 +592,17 @@ mod tests {
     }
 
     #[test]
-    fn tauri_config_explicitly_labels_the_capability_scoped_window() {
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+    fn capability_scope_targets_the_one_code_owned_window() {
+        // The window is built in `run()` (lib.rs) rather than tauri.conf.json so
+        // that WebView2 browser args can be opted into per-launch; its label is
+        // the single capability scope.
+        let capabilities: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
 
+        assert_eq!(crate::MAIN_WINDOW_LABEL, "main");
         assert_eq!(
-            config.pointer("/app/windows/0/label"),
-            Some(&serde_json::json!("main"))
+            capabilities.pointer("/windows"),
+            Some(&serde_json::json!([crate::MAIN_WINDOW_LABEL]))
         );
     }
 

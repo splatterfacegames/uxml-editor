@@ -12,5 +12,21 @@ fn main() {
             .expect("write version file");
         return;
     }
-    uxml_editor_lib::run();
+    // --open <dir> or a bare positional path opens that project directory on
+    // launch; the frontend claims it once via host_take_initial_project.
+    let mut initial_project = None;
+    let mut index = 1;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--open" {
+            if let Some(path) = args.get(index + 1) {
+                initial_project = Some(std::path::PathBuf::from(path));
+                index += 1;
+            }
+        } else if !arg.starts_with('-') && initial_project.is_none() {
+            initial_project = Some(std::path::PathBuf::from(arg));
+        }
+        index += 1;
+    }
+    uxml_editor_lib::run(initial_project);
 }

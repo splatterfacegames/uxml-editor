@@ -69,11 +69,19 @@ npm run check:licenses   # dependency license allowlist
 npm run build            # typecheck + browser production build
 npm run tauri:dev
 npm run tauri:build      # Windows installer and portable artifacts
+npm run smoke:packaged      # artifact + --version-file checks on the built exe
+npm run smoke:packaged:app  # Windows: drives the packaged app over WebView2 CDP
 ```
 
 CI runs the same commands on Linux and repeats the host tests plus a
 `tauri build --no-bundle` on Windows, which is the only platform that exercises
 the conditional-replacement implementation.
+
+The packaged executable accepts `--open <project-dir>` (or a bare directory
+argument) to open a project on launch. `smoke:packaged:app` uses that flag
+plus `UXML_EDITOR_CDP_PORT` — an opt-in WebView2 remote-debugging port the
+app honors only when the variable is set — to drive a real
+open → save → edit → relaunch cycle against files on disk.
 
 ## Architecture
 

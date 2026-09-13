@@ -92,6 +92,10 @@ const ITEMS = [
       if (smoke === '' || !/execFileSync|--version-file/.test(smoke)) {
         missing.push('no packaged-application smoke test exists');
       }
+      const workflowSmoke = read('scripts/smoke-packaged-app.mjs') ?? '';
+      if (workflowSmoke === '' || !/connectOverCDP|--open/.test(workflowSmoke)) {
+        missing.push('no packaged open/edit/save/relaunch workflow smoke exists');
+      }
       return missing;
     },
   },

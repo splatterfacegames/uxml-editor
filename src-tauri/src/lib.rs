@@ -19,8 +19,11 @@ use desktop::{
 };
 use error::HostError;
 use scoped_fs::{ProjectRootDto, ReadTextDto};
-use std::{sync::Arc, time::SystemTime};
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::{
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use watch::WatchEmitter;
 
@@ -54,6 +57,13 @@ async fn host_choose_project(
         )
     })?;
     state.select_project(&path).map(Some)
+}
+
+#[tauri::command]
+fn host_take_initial_project(
+    state: State<'_, HostState>,
+) -> Result<Option<ProjectRootDto>, HostError> {
+    state.take_initial_project()
 }
 
 #[tauri::command]
@@ -317,8 +327,13 @@ fn dialog_task_error(error: impl std::fmt::Display) -> HostError {
     )
 }
 
+/// The one capability-scoped window label; `capabilities/main.json` grants
+/// typed native events to exactly this window.
+pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run(initial_project: Option<std::path::PathBuf>) {
+    let initial_project = Mutex::new(initial_project);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .menu(desktop::build_menu)
@@ -333,17 +348,44 @@ pub fn run() {
                 );
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             let app_data_root = app.path().app_data_dir()?;
-            if !app.manage(HostState::new(app_data_root)) {
+            let initial = initial_project
+                .lock()
+                .map_err(|_| std::io::Error::other("Initial project argument is unavailable."))?
+                .take();
+            if !app.manage(HostState::new(app_data_root).with_initial_project(initial)) {
                 return Err(
                     std::io::Error::other("Desktop host state was already managed.").into(),
                 );
             }
+            let mut window = WebviewWindowBuilder::new(
+                app,
+                MAIN_WINDOW_LABEL,
+                WebviewUrl::App("index.html".into()),
+            )
+            .title("UXML Editor")
+            .inner_size(1200.0, 800.0)
+            .resizable(true);
+            if let Ok(port) = std::env::var("UXML_EDITOR_CDP_PORT") {
+                // Opt-in CDP surface for the packaged smoke test. Setting
+                // additional_browser_args replaces wry's defaults, so the
+                // stock flags are repeated verbatim.
+                window = window.additional_browser_args(&format!(
+                    concat!(
+                        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection ",
+                        "--autoplay-policy=no-user-gesture-required ",
+                        "--remote-debugging-port={} --remote-allow-origins=*"
+                    ),
+                    port.trim()
+                ));
+            }
+            window.build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             host_choose_project,
+            host_take_initial_project,
             host_enumerate_files,
             host_read_text,
             host_create_text,
@@ -364,7 +406,7 @@ pub fn run() {
             desktop_set_lifecycle_ready,
         ])
         .on_window_event(|window, event| {
-            if window.label() != "main" {
+            if window.label() != MAIN_WINDOW_LABEL {
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
