@@ -5,11 +5,13 @@ import { freezeParsedPreviewDocument } from '../adapter/immutableParsedDocument'
 import type {
   EditorDiagnostic,
   EditorElement,
+  EditorFidelityProfile,
   EditorNodeId,
   ParsedPreviewDocument,
   ProjectParseInput,
   UxmlPreviewPort,
 } from '../adapter/types';
+import { TEST_FIDELITY_PROFILE } from '../persistence/persistenceTestSupport';
 import type { SourcePatch } from '../commands/SourcePatch';
 
 const entryPath = 'Assets/UI/Main.uxml';
@@ -393,6 +395,8 @@ class TestAdapter implements UxmlPreviewPort {
   readonly inputs: ProjectParseInput[] = [];
 
   supportedControlNames(): readonly string[] { return Object.freeze([]); }
+
+  fidelityProfile(): EditorFidelityProfile { return TEST_FIDELITY_PROFILE; }
 
   parseProject(input: ProjectParseInput): ParsedPreviewDocument {
     const source = { ...input, stylesheets: new Map(input.stylesheets) };

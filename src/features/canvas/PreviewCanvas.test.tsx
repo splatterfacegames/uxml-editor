@@ -859,6 +859,10 @@ class ControlledPreviewPort implements UxmlPreviewPort {
     return this.base.supportedControlNames();
   }
 
+  fidelityProfile() {
+    return this.base.fidelityProfile();
+  }
+
   parseProject(input: ProjectParseInput): ParsedPreviewDocument {
     const parsed = this.base.parseProject(input);
     return this.parseDiagnostics.length === 0

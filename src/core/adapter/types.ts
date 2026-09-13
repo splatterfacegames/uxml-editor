@@ -90,6 +90,49 @@ export interface SerializedProject {
   readonly stylesheets: ReadonlyMap<string, string>;
 }
 
+/**
+ * A rendering difference from Unity the engine has confirmed it cannot close,
+ * mapped across the adapter boundary. `id` is stable — the compatibility
+ * document keys off it, so renaming is a breaking change for both.
+ */
+export interface EditorKnownDivergence {
+  readonly id: string;
+  readonly kind: 'unreproducible' | 'unspecified' | 'upstream';
+  readonly summary: string;
+  readonly detail: string;
+}
+
+/**
+ * The fidelity one control renderer stands on: 'measured' means checked against
+ * a running Unity, 'documented' means its structure comes from Unity's
+ * documentation and no measurement has confirmed it.
+ */
+export interface EditorControlFidelity {
+  readonly name: string;
+  readonly evidence: 'measured' | 'documented';
+}
+
+/**
+ * What the preview engine can honestly claim: which controls render as
+ * themselves rather than fallback boxes and on what evidence, which Unity
+ * versions the built-in theme rests on, and the divergences measurement has
+ * already found. Everything here is engine fact, not editor judgement — an
+ * adapter that cannot answer must say so rather than invent a profile.
+ */
+export interface EditorFidelityProfile {
+  readonly engine: string;
+  readonly engineVersion: string;
+  /** Unity version the built-in theme values were measured on. */
+  readonly measuredUnityVersion: string;
+  /**
+   * Unity version whose documentation the documented control renderers were
+   * read from, or null when no documented renderer exists.
+   */
+  readonly documentedUnityVersion: string | null;
+  readonly controls: readonly EditorControlFidelity[];
+  readonly divergences: readonly EditorKnownDivergence[];
+}
+
 export interface PreviewSize {
   readonly width: number;
   readonly height: number;
@@ -161,6 +204,12 @@ export type StyleExplanationOrigin =
     readonly selector: string;
     readonly property: string;
     readonly unityVersion: string;
+    /**
+     * Absent means measured from a running Unity on `unityVersion`.
+     * 'documented' means read from Unity's documentation and never measured —
+     * the inspector must not flatten the two into one claim.
+     */
+    readonly evidence?: 'documented';
   }
   | {
     readonly kind: 'default';
@@ -224,6 +273,7 @@ export interface UssSourcePort {
 
 export interface UxmlPreviewPort {
   supportedControlNames(): readonly string[];
+  fidelityProfile(): EditorFidelityProfile;
   parseProject(input: ProjectParseInput): ParsedPreviewDocument;
   serializeEntry(document: ParsedPreviewDocument): SerializedProject;
   render(

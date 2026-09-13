@@ -1,0 +1,138 @@
+name: Release
+
+# Cut a release by pushing a semver tag: `git tag v0.1.0 && git push origin v0.1.0`.
+# The tag version must match package.json / tauri.conf.json / Cargo.toml —
+# the workflow fails fast when they disagree rather than releasing a mislabeled
+# artifact.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: 'Windows release (installer, portable, checksums, SBOM)'
+    # windows-latest, not the self-hosted box: bundling needs the Windows SDK
+    # and NSIS/WiX toolchains, and the fleet's runner is Linux.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Authenticate private shared-stack dependency
+        shell: bash
+        env:
+          UXML_EDITOR_SHARED_STACK_READ_TOKEN: ${{ secrets.UXML_EDITOR_SHARED_STACK_READ_TOKEN }}
+          UXML_EDITOR_SHARED_STACK_DEPLOY_KEY: ${{ secrets.UXML_EDITOR_SHARED_STACK_DEPLOY_KEY }}
+        run: bash scripts/configure-shared-stack-auth.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+
+      - name: Verify tag version matches package manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          if [[ "${GITHUB_REF_NAME}" != v* ]]; then
+            tag="$(node -p "require('./package.json').version")"
+          fi
+          for manifest in package.json src-tauri/tauri.conf.json; do
+            declared="$(node -p "require('./$manifest').version")"
+            if [[ "$declared" != "$tag" ]]; then
+              echo "::error::$manifest declares $declared but the release is $tag"
+              exit 1
+            fi
+          done
+          cargo_version="$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)"
+          if [[ "$cargo_version" != "$tag" ]]; then
+            echo "::error::src-tauri/Cargo.toml declares $cargo_version but the release is $tag"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_ENV"
+
+      # Windows is the only platform where conditional replacement is
+      # implemented, so the host tests run before artifacts are built.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npx tauri build
+
+      - name: Package portable executable
+        shell: pwsh
+        run: |
+          Compress-Archive -Path src-tauri/target/release/uxml-editor.exe `
+            -DestinationPath "src-tauri/target/release/bundle/uxml-editor_${{ env.version }}_x64-portable.zip"
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $bundle = 'src-tauri/target/release/bundle'
+          Get-ChildItem -Recurse -File $bundle |
+            Where-Object { $_.Name -ne 'SHA256SUMS.txt' -and $_.Extension -ne '.sig' } |
+            ForEach-Object {
+              $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              $rel = $_.FullName.Substring((Resolve-Path $bundle).Path.Length + 1).Replace('\', '/')
+              "$hash  $rel"
+            } | Set-Content -Encoding ascii "$bundle/SHA256SUMS.txt"
+          Get-Content "$bundle/SHA256SUMS.txt"
+
+      - run: node scripts/smoke-packaged.mjs
+
+      - name: Generate CycloneDX SBOM
+        run: npx --yes @cyclonedx/cdxgen@12.8.4 -o sbom.cdx.json --spec-version 1.6
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes-body.md <<'EOF'
+          Standalone visual editor for Unity UI Toolkit UXML and USS.
+          Source fidelity is the product invariant: comments, unknown
+          controls, attribute order, formatting, and newline style survive a
+          round trip byte-for-byte.
+
+          **Artifacts.** `*-setup.exe` is the NSIS installer, `*.msi` the MSI
+          installer, `*-portable.zip` the portable build, `SHA256SUMS.txt` the
+          checksum manifest, and `sbom.cdx.json` the CycloneDX SBOM.
+
+          **Unsigned artifacts.** Builds are not code-signed: Windows
+          SmartScreen will warn on first launch ("Windows protected your PC")
+          — choose *More info → Run anyway*. Verify SHA256SUMS.txt before
+          installing.
+
+          **Compatibility.** Preview fidelity limits and the
+          measured-vs-documented control split are documented in
+          `docs/compatibility.md`.
+          EOF
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" != v* ]]; then tag="v${{ env.version }}"; fi
+          mapfile -t artifacts < <(
+            find src-tauri/target/release/bundle -type f \
+              \( -name '*.msi' -o -name '*-setup.exe' -o -name '*-portable.zip' -o -name 'SHA256SUMS.txt' \)
+          )
+          artifacts+=(sbom.cdx.json)
+          printf 'Artifacts:\n'; printf '  %s\n' "${artifacts[@]}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${artifacts[@]}" --clobber
+          else
+            gh release create "$tag" "${artifacts[@]}" \
+              --title "UXML Editor $tag" \
+              --notes-file release-notes-body.md
+          fi

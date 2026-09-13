@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-09-13
 
 ### Added
 
@@ -30,9 +30,27 @@ All notable changes to this project are documented here. The format follows
 - Diagnostics for property names Unity's USS importer drops, in stylesheets
   (reported at the declaration span) and in inline `style` attributes
   (reported against the element). Custom `--name` properties are exempt.
+- `adapter.fidelityProfile()` and the diagnostics panel's Preview fidelity
+  section surface the engine version, measured Unity version (6000.0.40f1),
+  documented Unity version (6000.3), per-control evidence, and known
+  divergences. `docs/compatibility.md` publishes the same matrix.
+- Visual-regression baselines: `tests/e2e/visual.spec.ts` compares the
+  menu-fixture workbench and canvas with `toHaveScreenshot`; platform-specific
+  baselines are committed and enforced in CI.
+- Packaged smoke test: `uxml-editor --version-file <path>` writes the package
+  version and exits, and `scripts/smoke-packaged.mjs` verifies the built
+  executable, installer artifacts, and checksum manifest after `tauri build`.
+- `docs/architecture.md`, `docs/compatibility.md`, and ADRs for source-backed
+  editing, style write targets, and recovery.
+- `scripts/check-goal.mjs` audits all 13 definition-of-done items and exits
+  non-zero on missing evidence.
+- `release.yml`: tag-triggered Windows release producing MSI and NSIS
+  installers, a portable zip, SHA256SUMS.txt, and a CycloneDX SBOM.
 
 ### Changed
 
+- `ExternalChangeDialog` renders through the shared-stack `Modal` (focus trap,
+  escape, overlay, focus restore) instead of bespoke `useModalFocus` plumbing.
 - Vendor chunks are split so no production bundle exceeds the size budget.
 - The preview engine is vendored source under `vendor/uxml-preview/` at
   `uxml-preview` 0.5.0 (Apache-2.0) instead of an npm dependency, so Unity 6.3

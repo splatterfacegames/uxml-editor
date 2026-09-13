@@ -43,6 +43,19 @@ jobs:
       - run: npm run test:e2e
       - run: npm run build
       - run: npm run check:licenses
+      # Visual baselines are platform-specific; CI generates missing -linux
+      # snapshots (updateSnapshots: 'missing') and this artifact carries them
+      # back so they can be reviewed and committed. Diffs from failed
+      # comparisons land in the test-results directory.
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        if: always()
+        with:
+          name: visual-snapshots
+          path: |
+            tests/e2e/visual.spec.ts-snapshots
+            node_modules/.cache/playwright-test-results
+          if-no-files-found: ignore
       # stadia-testbed's Azure egress intermittently stalls large uploads; the
       # dist bundle is reproducible, so never fail the leg on an upload stall.
       - uses: actions/upload-artifact@v4

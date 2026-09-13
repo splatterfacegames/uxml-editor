@@ -213,7 +213,17 @@ function destinationKey(target: StyleTarget): string {
 
 function describeOrigin(session: DocumentSession, origin: StyleExplanationOrigin): InspectorOrigin {
   if (origin.kind === 'default') return { label: 'Default' };
-  if (origin.kind === 'builtin-theme') return { label: `Built-in · ${origin.selector}` };
+  if (origin.kind === 'builtin-theme') {
+    return origin.evidence === 'documented'
+      ? {
+        label: `Built-in · ${origin.selector} · documented`,
+        title: `Unity ${origin.unityVersion} documentation — never measured against a running Unity`,
+      }
+      : {
+        label: `Built-in · ${origin.selector}`,
+        title: `Unity ${origin.unityVersion} theme — measured`,
+      };
+  }
   if (origin.kind === 'inherited') {
     const nested = describeOrigin(session, origin.origin);
     return { label: `Inherited · ${nested.label}`, ...(nested.title === undefined ? {} : { title: nested.title }) };

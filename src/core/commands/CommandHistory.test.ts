@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CommandHistory } from './CommandHistory';
 import { DocumentSession } from '../documents/DocumentSession';
-import type { EditorElement, EditorNodeId, ParsedPreviewDocument, ProjectParseInput, UxmlPreviewPort } from '../adapter/types';
+import type { EditorElement, EditorFidelityProfile, EditorNodeId, ParsedPreviewDocument, ProjectParseInput, UxmlPreviewPort } from '../adapter/types';
+import { TEST_FIDELITY_PROFILE } from '../persistence/persistenceTestSupport';
 import type { SourcePatch } from './SourcePatch';
 
 const entryPath = 'Main.uxml';
@@ -277,6 +278,8 @@ class SimpleAdapter implements UxmlPreviewPort {
   failWhenSourceIncludes: string | undefined;
 
   supportedControlNames(): readonly string[] { return Object.freeze([]); }
+
+  fidelityProfile(): EditorFidelityProfile { return TEST_FIDELITY_PROFILE; }
 
   parseProject(input: ProjectParseInput): ParsedPreviewDocument {
     if (this.failWhenSourceIncludes !== undefined && input.uxml.includes(this.failWhenSourceIncludes)) {

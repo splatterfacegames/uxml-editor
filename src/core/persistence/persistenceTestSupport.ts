@@ -1,5 +1,6 @@
 import type {
   EditorElement,
+  EditorFidelityProfile,
   EditorNodeId,
   ParsedPreviewDocument,
   ProjectParseInput,
@@ -7,10 +8,21 @@ import type {
 } from '../adapter/types';
 import { DocumentSession } from '../documents/DocumentSession';
 
+export const TEST_FIDELITY_PROFILE: EditorFidelityProfile = Object.freeze({
+  engine: 'test-adapter',
+  engineVersion: '0.0.0',
+  measuredUnityVersion: 'unmeasured',
+  documentedUnityVersion: null,
+  controls: Object.freeze([]),
+  divergences: Object.freeze([]),
+});
+
 export class PersistenceTestAdapter implements UxmlPreviewPort {
   failWhenSourceIncludes: string | undefined;
 
   supportedControlNames(): readonly string[] { return Object.freeze([]); }
+
+  fidelityProfile(): EditorFidelityProfile { return TEST_FIDELITY_PROFILE; }
 
   parseProject(input: ProjectParseInput): ParsedPreviewDocument {
     if (this.failWhenSourceIncludes !== undefined && input.uxml.includes(this.failWhenSourceIncludes)) {

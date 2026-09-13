@@ -581,6 +581,36 @@ describe('UxmlPreviewAdapter', () => {
     expect(hover!.candidates[0]!.order).toBeLessThan(hover!.candidates[1]!.order);
   });
 
+  it('keeps documented theme origins distinct from measured ones', () => {
+    const adapter = new UxmlPreviewAdapter();
+    const parsed = adapter.parseProject({
+      uxmlPath: 'main.uxml',
+      uxml: '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:Toggle name="t" /><ui:Button name="b" /></ui:UXML>',
+      stylesheets: new Map(),
+      resolveImport: () => null,
+    });
+    const toggle = nodeByName(parsed.root, 'ui:Toggle');
+    const button = nodeByName(parsed.root, 'ui:Button');
+
+    const documented = adapter.explain(parsed, toggle.id, 'flex-direction');
+    expect(documented?.computed.origin).toEqual({
+      kind: 'builtin-theme',
+      selector: '.unity-base-field',
+      property: 'flex-direction',
+      unityVersion: '6000.3',
+      evidence: 'documented',
+    });
+
+    // A measured theme value must not pick the marker up.
+    const measured = adapter.explain(parsed, button.id, 'margin-left');
+    expect(measured?.computed.origin).toMatchObject({
+      kind: 'builtin-theme',
+      selector: '.unity-button',
+      unityVersion: '6000.0.40f1',
+    });
+    expect((measured?.computed.origin as { evidence?: string }).evidence).toBeUndefined();
+  });
+
   it('omits source fields for unmappable inline and rule origins', async () => {
     vi.resetModules();
     vi.doMock('uxml-preview', async (importOriginal) => {
