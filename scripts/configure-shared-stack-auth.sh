@@ -15,11 +15,14 @@ if [[ -n "${UXML_EDITOR_SHARED_STACK_READ_TOKEN:-}" ]]; then
   authorization=$(printf 'x-access-token:%s' "$UXML_EDITOR_SHARED_STACK_READ_TOKEN" | base64 | tr -d '\r\n')
   echo "::add-mask::$authorization"
   for repository in https://github.com/splatterfacegames/jethaforge https://github.com/splatterfacegames/jethaforge.git; do
-    git config --global "http.$repository.extraheader" "AUTHORIZATION: basic $authorization"
+    git config --global --replace-all "http.$repository.extraheader" "AUTHORIZATION: basic $authorization"
   done
   # Cover both dep spellings: the pinned spec is git+https, but rewrite any
-  # ssh-style reference onto the authenticated HTTPS channel too.
-  git config --global url.https://github.com/splatterfacegames/jethaforge.git.insteadOf \
+  # ssh-style reference onto the authenticated HTTPS channel too. Self-hosted
+  # runners share ~/.gitconfig across runs, so clear the key before adding —
+  # a plain set fails on the multiple values a previous run left behind.
+  git config --global --unset-all url.https://github.com/splatterfacegames/jethaforge.git.insteadOf || true
+  git config --global --add url.https://github.com/splatterfacegames/jethaforge.git.insteadOf \
     ssh://git@github.com/splatterfacegames/jethaforge.git
   git config --global --add url.https://github.com/splatterfacegames/jethaforge.git.insteadOf \
     git@github.com:splatterfacegames/jethaforge.git
@@ -39,7 +42,8 @@ if [[ -n "${UXML_EDITOR_SHARED_STACK_DEPLOY_KEY:-}" ]]; then
   else
     export GIT_SSH_COMMAND="ssh -i '$key_dir/id_ed25519' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$key_dir/known_hosts'"
   fi
-  git config --global url.ssh://git@github.com/splatterfacegames/jethaforge.insteadOf \
+  git config --global --unset-all url.ssh://git@github.com/splatterfacegames/jethaforge.insteadOf || true
+  git config --global --add url.ssh://git@github.com/splatterfacegames/jethaforge.insteadOf \
     https://github.com/splatterfacegames/jethaforge
   git config --global --add url.ssh://git@github.com/splatterfacegames/jethaforge.insteadOf \
     https://github.com/splatterfacegames/jethaforge.git
