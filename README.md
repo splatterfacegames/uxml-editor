@@ -94,7 +94,11 @@ It is reachable from exactly one file,
 that the package is absent from `dependencies`, and that the app's TypeScript
 program stays free of Node typings.
 
-Decisions are recorded in [`docs/adr`](docs/adr).
+Layering and the fidelity model are described in
+[`docs/architecture.md`](docs/architecture.md); what the preview can and cannot
+reproduce — including which controls are measured versus merely documented —
+is in [`docs/compatibility.md`](docs/compatibility.md). Decisions are recorded
+in [`docs/adr`](docs/adr).
 
 ## License
 
