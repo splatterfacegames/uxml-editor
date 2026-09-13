@@ -1,8 +1,13 @@
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Search } from 'lucide-react';
-import type { CommandRegistry, EditorCommandState } from '../../core/store/CommandRegistry';
+import { useMemo } from 'react';
+import { useSyncExternalStore } from 'react';
+import {
+  CommandPalette as SharedCommandPalette,
+  ThemeProvider,
+  type ActionPresentation,
+} from '@jethac/tools-frontend-stack/ui';
+import '@jethac/tools-frontend-stack/ui/styles.css';
+import type { CommandRegistry } from '../../core/store/CommandRegistry';
 import type { WorkspaceUiController } from './WorkspaceUiController';
-import { useModalFocus } from './useModalFocus';
 
 export interface CommandPaletteProps {
   readonly registry: CommandRegistry;
@@ -11,62 +16,34 @@ export interface CommandPaletteProps {
 
 export function CommandPalette({ registry, ui }: CommandPaletteProps) {
   const commandSnapshot = useSyncExternalStore(registry.subscribe, registry.getSnapshot, registry.getSnapshot);
-  const [query, setQuery] = useState('');
-  const dialog = useRef<HTMLElement>(null);
-  const search = useRef<HTMLInputElement>(null);
-  const close = () => ui.closeCommandPalette();
-  useModalFocus({ active: true, container: dialog, initialFocus: search, onEscape: close });
-  const commands = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase('en-US');
-    return commandSnapshot.commands.filter((command) => normalized.length === 0
-      || `${command.category} ${command.label}`.toLocaleLowerCase('en-US').includes(normalized));
-  }, [commandSnapshot, query]);
-  const execute = async (command: EditorCommandState) => {
-    if (!command.enabled) return;
-    close();
-    await registry.execute(command.id);
-  };
+  const uiSnapshot = useSyncExternalStore(ui.subscribe, ui.getSnapshot, ui.getSnapshot);
+  const actions = useMemo<readonly ActionPresentation[]>(
+    () => commandSnapshot.commands.map((command) => ({
+      id: command.id,
+      label: command.label,
+      // The shared palette filters on label + aliases and treats group as
+      // section metadata; carrying the category through both keeps the
+      // bespoke palette's "type a category to narrow" behavior.
+      aliases: [command.category],
+      group: command.category,
+      shortcut: command.shortcut ?? undefined,
+      disabled: !command.enabled,
+      onInvoke: () => {
+        void registry.execute(command.id);
+      },
+    })),
+    [commandSnapshot, registry],
+  );
 
   return (
-    <div className="command-dialog-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) close();
-    }}>
-      <section
-        ref={dialog}
-        className="command-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command Palette"
-      >
-        <label className="command-dialog-search">
-          <span className="visually-hidden">Search commands</span>
-          <Search aria-hidden="true" size={15} />
-          <input
-            ref={search}
-            type="search"
-            aria-label="Search commands"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-          />
-        </label>
-        <div className="command-dialog-results" role="listbox" aria-label="Commands">
-          {commands.map((command) => (
-            <button
-              key={command.id}
-              type="button"
-              role="option"
-              aria-selected="false"
-              disabled={!command.enabled}
-              onClick={() => void execute(command)}
-            >
-              <span>{command.label}</span>
-              <small>{command.category}</small>
-              {command.shortcut !== null && <kbd>{command.shortcut}</kbd>}
-            </button>
-          ))}
-          {commands.length === 0 && <p>No matching commands</p>}
-        </div>
-      </section>
-    </div>
+    <ThemeProvider theme="light">
+      <SharedCommandPalette
+        actions={actions}
+        open={uiSnapshot.commandPaletteOpen}
+        onOpenChange={(open) => {
+          if (!open) ui.closeCommandPalette();
+        }}
+      />
+    </ThemeProvider>
   );
 }

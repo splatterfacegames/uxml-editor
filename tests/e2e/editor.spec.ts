@@ -1309,7 +1309,7 @@ async function expectClosedProject(page: Page): Promise<void> {
 
 async function runPaletteCommand(page: Page, label: string): Promise<void> {
   await page.getByRole('button', { name: 'Command Palette' }).click();
-  const palette = page.getByRole('dialog', { name: 'Command Palette' });
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
   await palette.getByRole('searchbox', { name: 'Search commands' }).fill(label);
   await palette.getByRole('option', { name: new RegExp(`^${escapeRegex(label)}\\b`) }).click();
   await settled(page);
@@ -1317,7 +1317,7 @@ async function runPaletteCommand(page: Page, label: string): Promise<void> {
 
 async function expectPaletteCommand(page: Page, label: string, enabled: boolean): Promise<void> {
   await page.getByRole('button', { name: 'Command Palette' }).click();
-  const palette = page.getByRole('dialog', { name: 'Command Palette' });
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
   await palette.getByRole('searchbox', { name: 'Search commands' }).fill(label);
   const option = palette.getByRole('option', { name: new RegExp(`^${escapeRegex(label)}\\b`) });
   if (enabled) await expect(option).toBeEnabled();
