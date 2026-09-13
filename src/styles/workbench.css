@@ -132,7 +132,10 @@
   outline-offset: -2px;
 }
 
-.external-change-dialog {
+/* The dialog chrome comes from the shared-stack Modal; these rules keep the
+   app's density and colors. Two-class selectors beat .atelier-modal's own
+   surface rules without depending on stylesheet order. */
+.atelier-modal.external-change-dialog {
   width: min(680px, 100%);
   max-height: calc(100vh - 140px);
   overflow: auto;
@@ -140,9 +143,15 @@
   border-radius: var(--radius-surface);
   background: var(--color-tool-pane);
   box-shadow: 0 12px 32px rgb(16 20 18 / 34%);
+  font-size: 11px;
 }
 
-.external-change-dialog > header {
+.external-change-dialog .atelier-modal__content {
+  padding: 0;
+  overflow: visible;
+}
+
+.external-change-dialog header {
   display: flex;
   align-items: center;
   min-height: 38px;

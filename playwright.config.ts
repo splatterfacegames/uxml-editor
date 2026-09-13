@@ -17,6 +17,11 @@ export default defineConfig({
     ...(browserChannel === undefined ? {} : { channel: browserChannel }),
     headless: true,
   },
+  // Visual baselines are platform-specific. On CI a missing baseline is
+  // written rather than failed, so a new capture can bootstrap itself; the
+  // -snapshots artifact then carries it back for review. Once committed, the
+  // baseline is enforced on every run.
+  updateSnapshots: process.env.CI ? 'missing' : 'none',
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}`,

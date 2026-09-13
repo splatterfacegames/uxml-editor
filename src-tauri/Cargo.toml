@@ -1,10 +1,10 @@
 [package]
 name = "uxml-editor"
-version = "0.0.0"
+version = "0.1.0"
 description = "Standalone visual editor for UXML and USS"
 authors = ["jethac"]
 license = "Apache-2.0"
-repository = "https://github.com/jethac/uxml-editor"
+repository = "https://github.com/splatterfacegames/uxml-editor"
 edition = "2021"
 rust-version = "1.77.2"
 

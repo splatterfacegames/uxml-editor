@@ -88,7 +88,8 @@ const ITEMS = [
         if (!has(`fixtures/projects/${project}`)) missing.push(`fixtures/projects/${project} missing`);
       }
       if (!anyMatch(e2eSpecs, /Packages|Resources/)) missing.push('no e2e resolves package/resource paths');
-      if (!anyMatch([...srcTests, ...e2eSpecs], /tauri build|packaged|installer|nsis/i)) {
+      const smoke = read('scripts/smoke-packaged.mjs') ?? '';
+      if (smoke === '' || !/execFileSync|--version-file/.test(smoke)) {
         missing.push('no packaged-application smoke test exists');
       }
       return missing;
