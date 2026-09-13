@@ -26,9 +26,20 @@ engine has to keep passing the measurements it was built from. It runs as part o
 
 ## Local changes
 
-`src/` is byte-identical to the tag above. Two tests resolved fixtures from the
-process working directory, which upstream can assume is its own repository root
-and this repository cannot:
+`src/` diverges from the tag in one feature area: `Toggle`, `TextField`,
+`IntegerField`, `FloatField`, `DropdownField`, `Slider`, `SliderInt`, and
+`Foldout` now render with the child elements and USS classes Unity documents
+for them (upstream draws every non-renderer control as a fallback box). The
+change touches `src/controls/registry.ts` (generated parts form a named tree
+instead of a chain), `src/controls/theme.ts` (`DOCUMENTED_USS`, a separate
+documented-not-measured sheet), `src/model/types.ts` (`StyleOrigin` gains an
+`evidence: 'documented'` marker), `src/layout/yoga.ts`, `src/render/paint.ts`,
+and `src/style/resolve.ts` (layout, paint, and cascade walk the part tree;
+documented provenance flows into style explanations). `tests/controls/
+fields.test.ts` is local-only coverage for the new renderers.
+
+Two tests resolved fixtures from the process working directory, which upstream
+can assume is its own repository root and this repository cannot:
 
 - `tests/render/visual.test.ts` — snapshots resolve from `import.meta.dirname`
   instead of `process.cwd()/tests/render/snapshots`. Without this the suite
