@@ -66,6 +66,11 @@ function productionPackagePaths() {
     .filter((line) => line.includes('node_modules'));
 }
 
+// First-party private packages in the splatterfacegames org ship no license
+// field; they are not third-party redistribution. Everything else must carry
+// an allowlisted license.
+const FIRST_PARTY_PACKAGES = new Set(['@jethac/tools-frontend-stack']);
+
 const violations = [];
 for (const packagePath of productionPackagePaths()) {
   const manifestPath = join(packagePath, 'package.json');
@@ -76,6 +81,7 @@ for (const packagePath of productionPackagePaths()) {
     violations.push(`${relative(repositoryRoot, manifestPath)}: unreadable (${error.message})`);
     continue;
   }
+  if (FIRST_PARTY_PACKAGES.has(manifest.name)) continue;
   const license = licenseOf(manifest);
   const name = `${manifest.name ?? relative(repositoryRoot, packagePath)}@${manifest.version ?? 'unknown'}`;
   if (license === null) {
