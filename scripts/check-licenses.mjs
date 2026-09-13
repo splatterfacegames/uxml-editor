@@ -48,11 +48,18 @@ function licenseOf(manifest) {
 }
 
 function productionPackagePaths() {
-  const stdout = execFileSync('npm', ['ls', '--all', '--omit=dev', '--parseable'], {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  // On Windows npm is a .cmd shim, so route through cmd.exe instead of a bare
+  // spawn (which cannot execute .cmd) or shell:true (deprecated arg concat).
+  const windows = process.platform === 'win32';
+  const stdout = execFileSync(
+    windows ? (process.env.ComSpec ?? 'cmd.exe') : 'npm',
+    windows ? ['/d', '/s', '/c', 'npm', 'ls', '--all', '--omit=dev', '--parseable'] : ['ls', '--all', '--omit=dev', '--parseable'],
+    {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   return stdout
     .split('\n')
     .map((line) => line.trim())
