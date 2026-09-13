@@ -30,7 +30,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
+      # No cache: on setup-node — its post-job npm-cache save uploads to the
+      # actions cache service, which intermittently stalls on this box's Azure
+      # egress (observed: >20 min in post steps). npm ci is fast enough without
+      # it; the git dependency dominates install time regardless.
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -60,6 +63,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # PR runs restore the cache but never save: the post-job cache
+          # upload stalls on stadia-testbed's Azure egress. Main pushes keep
+          # the cache warm without gating pull requests on the upload.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Tauri system dependencies
         # The self-hosted box already ships webkit2gtk; keep the install for a
         # hypothetical github-hosted fallback only.
