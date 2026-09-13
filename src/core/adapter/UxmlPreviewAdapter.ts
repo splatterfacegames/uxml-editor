@@ -1,11 +1,15 @@
 import {
+  controlEvidence,
+  DOCUMENTED_UNITY_VERSION,
   explainProperty,
+  KNOWN_DIVERGENCES,
   loadLayoutEngine,
   parse,
   render as renderPreview,
   resolveStyles,
   serialize,
   supportedControlNames as previewSupportedControlNames,
+  THEME_UNITY_VERSION,
 } from 'uxml-preview';
 import type {
   Candidate,
@@ -31,6 +35,7 @@ import type {
   StyleExplanationOptions,
   StyleExplanation,
   StyleExplanationOrigin,
+  EditorFidelityProfile,
   EditorStylesheet,
   UssSourcePort,
   UxmlPreviewPort,
@@ -44,6 +49,30 @@ const documentNodes = new WeakMap<ParsedPreviewDocument, ReadonlyMap<EditorNodeI
 let layoutEnginePromise: Promise<void> | undefined;
 const EMPTY_UXML = '<ui:UXML xmlns:ui="UnityEngine.UIElements" />';
 const INLINE_SELECTOR = '__inline__';
+
+// The vendored engine's upstream version; vendor/uxml-preview/PROVENANCE.md is
+// the record a re-sync updates, and the adapter characterization test asserts
+// the two agree.
+const VENDORED_ENGINE_VERSION = '0.5.0';
+
+const FIDELITY_PROFILE: EditorFidelityProfile = Object.freeze({
+  engine: 'uxml-preview',
+  engineVersion: VENDORED_ENGINE_VERSION,
+  measuredUnityVersion: THEME_UNITY_VERSION,
+  documentedUnityVersion: DOCUMENTED_UNITY_VERSION,
+  controls: Object.freeze(previewSupportedControlNames().map((name) => Object.freeze({
+    name,
+    // A name the registry lists always resolves here; the fallback keeps the
+    // profile honest rather than silently upgrading a control to 'measured'.
+    evidence: controlEvidence(name) ?? 'documented',
+  }))),
+  divergences: Object.freeze(KNOWN_DIVERGENCES.map((divergence) => Object.freeze({
+    id: divergence.id,
+    kind: divergence.kind,
+    summary: divergence.summary,
+    detail: divergence.detail,
+  }))),
+});
 
 function editorNodeId(nodeId: NodeId): EditorNodeId {
   return String(nodeId) as EditorNodeId;
@@ -284,6 +313,7 @@ function editorStyleOrigin(
         selector: origin.selector,
         property: origin.property,
         unityVersion: origin.unityVersion,
+        ...(origin.evidence === 'documented' ? { evidence: 'documented' as const } : {}),
       };
     case 'default':
       return { kind: 'default' };
@@ -321,6 +351,10 @@ export class UxmlPreviewAdapter implements UxmlPreviewPort, UssSourcePort {
 
   supportedControlNames(): readonly string[] {
     return Object.freeze([...previewSupportedControlNames()]);
+  }
+
+  fidelityProfile(): EditorFidelityProfile {
+    return FIDELITY_PROFILE;
   }
 
   parseStylesheet(path: string, source: string): EditorStylesheet {

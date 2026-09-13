@@ -45,7 +45,9 @@ export { loadLayoutEngine, isLayoutEngineReady, liveNodeCount } from './layout/y
 export type { LayoutBox, MeasureText, TextContext, TextMetrics } from './layout/yoga';
 export { createDefaultMeasureText } from './render/measure';
 export { NODE_ATTRIBUTE, PART_ATTRIBUTE, PART_OWNER_ATTRIBUTE } from './render/paint';
-export { supportedControlNames } from './controls/registry';
+export { controlEvidence, supportedControlNames } from './controls/registry';
+export type { ControlEvidence } from './controls/registry';
+export { DOCUMENTED_UNITY_VERSION, THEME_UNITY_VERSION } from './controls/theme';
 export { resolveStyles, explainProperty } from './style/resolve';
 export type {
   Candidate,

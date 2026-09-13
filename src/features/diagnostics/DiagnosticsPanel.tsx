@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { CircleAlert, Search } from 'lucide-react';
-import type { EditorDiagnostic } from '../../core/adapter/types';
+import type { EditorDiagnostic, EditorFidelityProfile } from '../../core/adapter/types';
 import type { SourceEditCoordinator } from '../../core/documents/SourceEditCoordinator';
 import type { EditorStore } from '../../core/store/EditorStore';
 
@@ -57,6 +57,7 @@ export function DiagnosticsPanel({
   };
 
   let visibleIndex = 0;
+  const fidelity = store.getSnapshot().session?.adapter.fidelityProfile() ?? null;
   return (
     <div className="diagnostics-panel">
       <div className="diagnostics-toolbar">
@@ -81,6 +82,7 @@ export function DiagnosticsPanel({
         <output aria-label="Diagnostic count">{visible.length}</output>
       </div>
       <div className="diagnostics-results">
+        {fidelity !== null && <FidelitySection profile={fidelity} />}
         {groups.map((group) => (
           <section className="diagnostic-group" key={group.path} aria-label={`${group.path} warnings`}>
             <h3>{group.path}</h3>
@@ -111,6 +113,49 @@ export function DiagnosticsPanel({
         {visible.length === 0 && <span className="pane-empty">No matching diagnostics</span>}
       </div>
     </div>
+  );
+}
+
+function FidelitySection({ profile }: { readonly profile: EditorFidelityProfile }) {
+  const measured = profile.controls.filter((control) => control.evidence === 'measured');
+  const documented = profile.controls.filter((control) => control.evidence === 'documented');
+  return (
+    <details className="diagnostics-fidelity">
+      <summary>
+        Preview fidelity — {profile.engine} {profile.engineVersion}, theme measured on
+        Unity {profile.measuredUnityVersion}
+      </summary>
+      <div className="diagnostics-fidelity-body">
+        <p>
+          {profile.controls.length} controls render as themselves; anything else stays
+          in the tree as a labeled fallback box and reports a diagnostic.
+        </p>
+        <p>
+          Measured against Unity {profile.measuredUnityVersion}:{' '}
+          {measured.map((control) => control.name).join(', ') || 'none'}.
+          {documented.length > 0 && (
+            <>
+              {' '}Drawn from Unity {profile.documentedUnityVersion} documentation
+              (unmeasured): {documented.map((control) => control.name).join(', ')}.
+            </>
+          )}
+        </p>
+        {profile.divergences.length > 0 && (
+          <ul className="diagnostics-divergences">
+            {profile.divergences.map((divergence) => (
+              <li key={divergence.id}>
+                <span className="divergence-kind">{divergence.kind}</span>{' '}
+                <strong>{divergence.summary}</strong> {divergence.detail}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="diagnostics-fidelity-doc">
+          The supported elements, selectors, properties, units, pseudo states, and asset
+          forms are listed in docs/compatibility.md.
+        </p>
+      </div>
+    </details>
   );
 }
 

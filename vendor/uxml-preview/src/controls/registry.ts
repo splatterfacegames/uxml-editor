@@ -540,3 +540,14 @@ export function contentPartOf(spec: ControlSpec): string | undefined {
 export function supportedControlNames(): string[] {
   return Object.keys(CONTROLS);
 }
+
+/**
+ * Purpose:      the fidelity a named control's renderer stands on, or
+ *               undefined for a control without one.
+ * Ensures:      'measured' means the renderer's geometry and theme were checked
+ *               against a running Unity; 'documented' means its structure comes
+ *               from Unity's documentation and no measurement has confirmed it.
+ */
+export function controlEvidence(name: string): ControlEvidence | undefined {
+  return CONTROLS[name]?.evidence;
+}

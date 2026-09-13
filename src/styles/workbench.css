@@ -973,6 +973,69 @@
   text-align: right;
 }
 
+.diagnostics-fidelity {
+  border-bottom: 1px solid var(--color-tool-border);
+  background: #eef0ec;
+  font-size: 10.5px;
+}
+
+.diagnostics-fidelity summary {
+  min-height: 23px;
+  padding: 4px 8px;
+  overflow: hidden;
+  color: #555d58;
+  font-size: 10px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.diagnostics-fidelity summary:hover {
+  background: #e4e8e3;
+}
+
+.diagnostics-fidelity-body {
+  padding: 4px 10px 8px;
+  color: var(--color-text);
+  line-height: 1.45;
+}
+
+.diagnostics-fidelity-body p {
+  margin: 0 0 6px;
+}
+
+.diagnostics-divergences {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.diagnostics-divergences li {
+  margin-bottom: 5px;
+}
+
+.diagnostics-divergences strong {
+  font-weight: 640;
+}
+
+.divergence-kind {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid #c6ccc7;
+  border-radius: 3px;
+  color: #555d58;
+  background: #f6f8f5;
+  font-size: 9px;
+  font-weight: 680;
+  text-transform: uppercase;
+}
+
+.diagnostics-fidelity-doc {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
 .pane-resizer {
   position: relative;
   z-index: 2;

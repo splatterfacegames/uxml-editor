@@ -92,6 +92,35 @@ describe('DiagnosticsPanel', () => {
     expect(store.getSnapshot().selection).toEqual([title.id]);
     expect(coordinator.getSnapshot().activePath).toBe(entryPath);
   });
+
+  it('surfaces the engine fidelity profile with measured version, controls, and divergences', () => {
+    const { session, store, coordinator } = createContext();
+    const profile = session.adapter.fidelityProfile();
+    render(<Harness store={store} coordinator={coordinator} diagnostics={[]} />);
+
+    const section = screen.getByText(/Preview fidelity/i).closest('details');
+    expect(section).not.toBeNull();
+    expect(section).toHaveTextContent(`uxml-preview ${profile.engineVersion}`);
+    expect(section).toHaveTextContent(profile.measuredUnityVersion);
+    for (const control of profile.controls) {
+      expect(section).toHaveTextContent(control.name);
+    }
+    for (const divergence of profile.divergences) {
+      expect(section).toHaveTextContent(divergence.summary);
+    }
+    expect(profile.controls.map((control) => control.name)).toContain('Button');
+    expect(profile.divergences.map((entry) => entry.id)).toContain('text-metrics');
+    // Documented renderers must be labelled as such — never flattened into the
+    // measured set (UXML_GOAL.md: no pretending unmeasured behavior is exact).
+    const documented = profile.controls.filter((control) => control.evidence === 'documented');
+    for (const control of documented) {
+      expect(section).toHaveTextContent(control.name);
+    }
+    if (documented.length > 0) {
+      expect(profile.documentedUnityVersion).not.toBeNull();
+      expect(section).toHaveTextContent(`${profile.documentedUnityVersion}`);
+    }
+  });
 });
 
 function Harness({
