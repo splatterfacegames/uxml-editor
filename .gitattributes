@@ -2,3 +2,9 @@ fixtures/projects/menu/Assets/UI/Menu.uxml -text whitespace=cr-at-eol
 fixtures/projects/menu/Assets/UI/Menu.uss -text whitespace=cr-at-eol
 fixtures/projects/malformed/Assets/UI/Malformed.uxml text eol=lf
 fixtures/projects/malformed/Assets/UI/Malformed.uss text eol=lf
+# Vendored engine is byte-identical to its upstream tag, including fixtures
+# that deliberately mix LF and CRLF. Never let platform eol conversion touch it.
+vendor/** -text
+# Fixture projects are byte-exact test oracles (CRLF menu, LF others). Check
+# out blob bytes verbatim on every platform.
+fixtures/** -text
