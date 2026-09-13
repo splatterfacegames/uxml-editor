@@ -8,6 +8,9 @@ Editing is source-backed: every hierarchy, canvas, and inspector action is a
 patch against the original UXML/USS bytes, so comments, attribute order, and
 user formatting survive a round trip.
 
+![UXML Editor workbench: palette and hierarchy on the left, the rendered UXML
+canvas in the middle, inspector on the right, diagnostics below](docs/screenshots/workbench-1366x768.png)
+
 ## What works
 
 - **Projects** — open a directory through the File System Access API in the
