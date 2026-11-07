@@ -85,10 +85,27 @@
     margin-left: 6px;
     flex-basis: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .panel-list {
     background-color: rgb(48, 48, 48);
+}
+
+/* A long row elides; the tooltip has the whole text. */
+.panel-list .unity-label {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.panel-list .unity-tree-view__item-content {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    overflow: hidden;
 }
 
 .host {
@@ -116,12 +133,14 @@
     flex-grow: 1;
     flex-basis: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .history-label {
     width: 420px;
     flex-shrink: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
     -unity-text-align: middle-right;
     padding-right: 8px;
 }
@@ -150,9 +169,74 @@
     width: 120px;
     flex-shrink: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .diag-menu {
     min-width: 60px;
     flex-shrink: 1;
+}
+
+/* Milestone 6: the transition timeline. */
+.timeline-header {
+    width: 76px;
+    flex-shrink: 0;
+}
+
+.tl-button {
+    width: 28px;
+    -unity-text-align: middle-center;
+}
+
+.tl-speed {
+    min-width: 52px;
+}
+
+/* Changes during playback: a fixed width, so no layout per frame. */
+.tl-time {
+    width: 112px;
+    flex-shrink: 0;
+    -unity-text-align: middle-center;
+    color: rgb(200, 200, 200);
+    overflow: hidden;
+}
+
+.tl-caption {
+    -unity-text-align: middle-center;
+    color: rgb(170, 170, 170);
+    margin-left: 4px;
+    margin-right: 2px;
+}
+
+.tl-cond {
+    width: 180px;
+    flex-shrink: 1;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.tl-cond-menu {
+    min-width: 18px;
+    width: 18px;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.tl-scope {
+    min-width: 84px;
+    margin-left: 6px;
+}
+
+.tl-info {
+    flex-grow: 1;
+    flex-basis: 0;
+    margin-left: 6px;
+    -unity-text-align: middle-left;
+    color: rgb(160, 160, 160);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tl-tracks {
+    background-color: rgb(44, 44, 44);
 }

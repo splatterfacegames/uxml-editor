@@ -23,8 +23,14 @@ extends RefCounted
 ##   picker          the write-target picker of a min-width edit
 ##   states          the :hover state forced on a button, its rule wins
 ##   classes         the class editor with the rules of each class
-## The stages tabs, recovery and conflict work on a copy of the menu
-## fixture in user://demo-* (they write files).
+##   timeline        a :hover toggle played on the canvas, paused in the
+##                   middle; the easing curve in the inspector
+##   timeline-classes  a run from one class to another, document scope
+##   easing          the easing picker of the timing function
+##   canvas-picker   the write-target picker at the end of a canvas drag
+##   narrow          a narrow inspector: long texts elide
+## The stages tabs, recovery, conflict and the timeline stages work on a
+## copy of the menu fixture in user://demo-* (they write files).
 
 
 static func stage(m: EdMain, demo: String) -> void:
@@ -114,6 +120,7 @@ static func stage(m: EdMain, demo: String) -> void:
 		"conflict":
 			var dir := _copy_menu("demo-conflict")
 			m.state.open_project(dir)
+			m.state.open_document("Assets/UI/Menu.uxml")
 			await _frames(tree, 3)
 			m.state.execute(EdUxmlCommands.set_attribute(m.state.session, EdLocator.create(_node(m, "play-button")), "text", "Mine"), "demo")
 			var path := dir + "/Assets/UI/Menu.uxml"
@@ -160,7 +167,91 @@ static func stage(m: EdMain, demo: String) -> void:
 			_select(m, "play-button")
 			await _frames(tree, 3)
 			m.inspector.flush()
+		"timeline":
+			_open_transitions(m, "demo-timeline")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			m.inspector.set_state("hover", true)
+			m.timeline.seek_to(0.6)
+			m.inspector.show_property("transition-timing-function")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			m.inspector.doc.scroll_to("scroll", "easing-row")
+		"timeline-classes":
+			_open_transitions(m, "demo-timeline")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.timeline.set_scope("document")
+			m.timeline.set_state_text("from", ".menu-button")
+			m.timeline.set_state_text("to", ".menu-button.alt")
+			m.timeline.seek_to(0.3)
+		"easing":
+			_open_transitions(m, "demo-timeline")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			m.inspector.doc.scroll_to("scroll", "easing-row")
+			await _frames(tree, 3)
+			m.inspector.open_easing_picker("transition-timing-function", m.inspector.doc.get_element("easing-curve"))
+		"canvas-picker":
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			m.layout.begin("move")
+			m.layout.update("move", Vector2(40, 12), false, true)
+			await _frames(tree, 3)
+			m.layout.finish(false)
+		"narrow":
+			m.shell.set_split_dimension("right-split", 300.0)
+			var long_rule := ".menu-button, .menu-button.primary, .menu-root > .menu-button {\n  max-width: 400px;\n}\n"
+			var path := "Assets/UI/Menu.uss"
+			var ws := m.state.workspace
+			var end := ws.text(path).length()
+			m.state.execute(EdTransaction.make("demo", "A long rule", path, [{"start": end, "end": end, "replacement": long_rule}]), "demo")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.inspector.show_property("min-width")
+			await _frames(tree, 3)
+			m.inspector.flush()
 	await _frames(tree, 6)
+
+
+## A rule of the demos and the benchmark: transitions, a state rule and
+## another class.
+const TRANSITIONS := """
+.menu-button {
+  transition-property: background-color, min-width, opacity;
+  transition-duration: 0.5s, 1s, 0.3s;
+  transition-delay: 0s, 0.2s, 0.4s;
+  transition-timing-function: ease-in-out, ease-out-bounce, linear;
+}
+.menu-button:hover {
+  background-color: #c0392b;
+  min-width: 320px;
+  opacity: 0.6;
+}
+.alt {
+  background-color: #2471a3;
+  min-width: 260px;
+}
+"""
+
+
+## Open a copy of the menu fixture with the rules of TRANSITIONS.
+static func _open_transitions(m: EdMain, name: String) -> void:
+	var dir := _copy_menu(name)
+	var path := dir + "/Assets/UI/Menu.uss"
+	var text := FileAccess.get_file_as_string(path) + TRANSITIONS
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(text)
+	f.close()
+	m.state.open_project(dir)
+	m.state.open_document("Assets/UI/Menu.uxml")
 
 
 const SETTINGS := """<ui:UXML xmlns:ui="UnityEngine.UIElements">
@@ -178,7 +269,7 @@ static func _copy_menu(name: String) -> String:
 	var dir := ProjectSettings.globalize_path("user://" + name)
 	_copy(ProjectSettings.globalize_path("res://fixtures/projects/menu"), dir)
 	var rdir := ProjectSettings.globalize_path("user://demo-recovery-journal")
-	if name != "demo-recovery":
+	if name != "demo-recovery" or not DirAccess.dir_exists_absolute(rdir):
 		return dir
 	for d in DirAccess.get_directories_at(rdir):
 		for f in DirAccess.get_files_at(rdir + "/" + d):

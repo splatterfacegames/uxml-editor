@@ -4,7 +4,8 @@
   editor dark skin. Native Godot controls go into the *-host elements:
   the canvas (a SubViewport), the source view (CodeEdit) and the inspector
   (a second godot-uxml document, updated in place) and the document tabs
-  (a small godot-uxml document of its own).
+  (a small godot-uxml document of its own). The timeline tracks are an
+  IMGUIContainer that the editor draws (UxmlDocument.set_imgui_handler).
 -->
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
   <Style src="editor_shell.uss" />
@@ -32,7 +33,7 @@
       <uie:ToolbarSpacer class="grow" />
       <ui:Label name="document-label" class="document-label" text="No project" />
     </uie:Toolbar>
-    <ui:TwoPaneSplitView name="main-split" fixed-pane-index="0" fixed-pane-initial-dimension="280" class="grow">
+    <ui:TwoPaneSplitView name="main-split" fixed-pane-index="0" fixed-pane-initial-dimension="260" class="grow">
       <ui:TwoPaneSplitView name="left-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="150">
         <ui:VisualElement class="panel">
           <ui:Label class="panel-header" text="Project" />
@@ -52,12 +53,32 @@
           </ui:VisualElement>
         </ui:TwoPaneSplitView>
       </ui:TwoPaneSplitView>
-      <ui:TwoPaneSplitView name="right-split" fixed-pane-index="1" fixed-pane-initial-dimension="340">
-        <ui:TwoPaneSplitView name="center-split" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="280">
+      <ui:TwoPaneSplitView name="right-split" fixed-pane-index="1" fixed-pane-initial-dimension="440">
+        <ui:TwoPaneSplitView name="center-split" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="420">
           <ui:VisualElement class="panel">
             <ui:VisualElement name="tabs-host" class="host tabs-host" />
             <ui:Label name="canvas-header" class="panel-header" text="Canvas" />
             <ui:VisualElement name="canvas-host" class="host grow" />
+          </ui:VisualElement>
+          <ui:TwoPaneSplitView name="lower-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="150">
+          <ui:VisualElement name="timeline-panel" class="panel">
+            <ui:VisualElement class="panel-header-row timeline-bar">
+              <ui:Label class="panel-header timeline-header" text="Timeline" />
+              <uie:ToolbarButton name="tl-restart" class="tl-button" text="|◀" tooltip="Back to the start" />
+              <uie:ToolbarButton name="tl-play" class="tl-button" text="▶" tooltip="Play or pause the transitions from the From state to the To state" />
+              <uie:ToolbarToggle name="tl-loop" text="Loop" tooltip="Play again from the start at the end" />
+              <uie:ToolbarMenu name="tl-speed" class="tl-speed" text="1×" tooltip="Playback speed" />
+              <ui:Label name="tl-time" class="tl-time" text="0.00 s" />
+              <ui:Label class="tl-caption" text="From" />
+              <ui:TextField name="tl-from" class="tl-cond" is-delayed="true" tooltip="The start state: classes and pseudo-states, for example .menu-button or .menu-button:hover" />
+              <uie:ToolbarMenu name="tl-from-menu" class="tl-cond-menu" text="" tooltip="Choose the start state" />
+              <ui:Label class="tl-caption" text="→" />
+              <ui:TextField name="tl-to" class="tl-cond" is-delayed="true" tooltip="The end state: classes and pseudo-states" />
+              <uie:ToolbarMenu name="tl-to-menu" class="tl-cond-menu" text="" tooltip="Choose the end state" />
+              <uie:ToolbarMenu name="tl-scope" class="tl-scope" text="Selection" tooltip="Show the transitions of the selection or of the whole document" />
+              <ui:Label name="tl-info" class="tl-info" text="" />
+            </ui:VisualElement>
+            <ui:IMGUIContainer name="tl-tracks" class="grow tl-tracks" />
           </ui:VisualElement>
           <ui:VisualElement class="panel">
             <ui:VisualElement class="panel-header-row">
@@ -78,6 +99,7 @@
               </ui:VisualElement>
             </ui:TwoPaneSplitView>
           </ui:VisualElement>
+          </ui:TwoPaneSplitView>
         </ui:TwoPaneSplitView>
         <ui:VisualElement class="panel">
           <ui:Label class="panel-header" text="Inspector" />

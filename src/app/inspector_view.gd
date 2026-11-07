@@ -30,6 +30,11 @@ signal jump_requested(path: String, start: int, end: int)
 signal select_requested(id: int)
 ## The pseudo-states of the state preview changed for editor node `id`.
 signal states_changed(id: int, states: Array)
+## A state toggle of the state preview: the states before and after (the
+## timeline plays the transitions of the change).
+signal states_toggled(id: int, before: Array, after: Array)
+## A class edit of the class editor: the author classes before and after.
+signal classes_toggled(id: int, before: Array, after: Array)
 
 const COMMON_ATTRIBUTES := ["name", "class", "text", "tooltip", "picking-mode", "focusable", "tabindex", "view-data-key"]
 const COMMON_STYLES := [
@@ -45,10 +50,13 @@ const COMMON_STYLES := [
 ]
 ## The states of the state preview (godot-uxml set_forced_states, R6).
 const STATES := ["hover", "active", "focus", "checked", "selected", "disabled"]
-## Extra rows (attributes and declarations outside the common lists, and
-## classes) come in blocks of this size. A block that is not in use is
-## not displayed.
+## Extra rows (attributes and declarations outside the common lists) come
+## in blocks of this size. A block that is not in use is not displayed.
 const POOL_STEP := 2
+## Class rows: one block per class, displayed only when in use, so the
+## Classes section has the height of its content. The skeleton holds at
+## least this many.
+const CLASS_MIN := 2
 ## Rows of the declaration list.
 const PROV_ROWS := 8
 const REMOVE_LABEL := "(remove the declaration)"
@@ -91,6 +99,11 @@ var asset_lister: Callable
 var _color_popup: PopupPanel = null
 var _anchor: Control = null
 var _coalesce := 0
+## The timing function that the curve shows.
+var _easing_shown := ""
+var easing_picker: EdEasingPicker = null
+## field -> the placeholder before elision.
+var _placeholder_full: Dictionary = {}
 
 
 func _init() -> void:
@@ -123,14 +136,11 @@ func flush() -> void:
 
 func _rebuild() -> void:
 	_pending = false
-	var key := _selection_key()
-	if key != _sticky_key:
-		_sticky.clear()
-		_sticky_key = key
+	_sync_sticky()
 	var v := _view()
 	var need_a := _round(v["attrs"].size() - COMMON_ATTRIBUTES.size())
 	var need_s := _round(v["styles"].size() - COMMON_STYLES.size())
-	var need_c := _round(v["classes"].size())
+	var need_c := maxi(CLASS_MIN, v["classes"].size())
 	if _attr_pool < need_a or _style_pool < need_s or _class_pool < need_c:
 		_build_skeleton(maxi(need_a, _attr_pool), maxi(need_s, _style_pool), maxi(need_c, _class_pool))
 	_apply(v)
@@ -139,10 +149,23 @@ func _rebuild() -> void:
 		focus_type_field()
 
 
+## The write-target choices stay for the selection and the states of the
+## state preview; another selection forgets them.
+func _sync_sticky() -> void:
+	var key := _selection_key()
+	if key != _sticky_key:
+		_sticky.clear()
+		_sticky_key = key
+
+
 func _selection_key() -> String:
 	if _node == null or _session == null:
 		return ""
-	return "%s|%s|%s" % [_session.entry_path, JSON.stringify(EdLocator.create(_node)), ",".join(states())]
+	# The identity of the element, not its attribute values: a write to the
+	# `style` attribute keeps the selection.
+	var nm = _node.get_attribute("name")
+	var who: String = "#" + String(nm) if nm != null else JSON.stringify(_node.child_path())
+	return "%s|%s|%s|%s" % [_session.entry_path, _node.name, who, ",".join(states())]
 
 
 ## Extra rows: at least POOL_STEP, in steps of POOL_STEP.
@@ -238,6 +261,11 @@ func _view() -> Dictionary:
 		v["styles"].append(inline.get(prop, {"label": prop, "value": "",
 			"placeholder": _computed_text(computed, EdProvenance.longhand_of(prop)), "removable": false}))
 	v["styles"].append_array(extra_styles)
+	var tf_inline := ""
+	if inline.has("transition-timing-function"):
+		tf_inline = String(inline["transition-timing-function"]["value"])
+	var tf_computed = computed.get("transition-timing-function", {})
+	v["easing"] = tf_inline if not tf_inline.is_empty() else (String(tf_computed.get("value", "ease")) if tf_computed is Dictionary else "ease")
 	v["colors"] = {}
 	for prop in COMMON_STYLES:
 		if EdStyleTypes.kind_of(prop) == "color":
@@ -346,18 +374,16 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	out.append("</ui:VisualElement>")
 	# Classes.
 	out.append("<ui:Foldout name=\"class-section\" text=\"Classes\" value=\"true\" class=\"section\">")
-	for b in class_pool / POOL_STEP:
-		out.append("<ui:VisualElement name=\"block-class-%d\" class=\"%s\">" % [b, "block" if b == 0 else "block hidden"])
-		for j in POOL_STEP:
-			var i := b * POOL_STEP + j
-			out.append("<ui:VisualElement name=\"row-class-%d\" class=\"row invisible\">" % i)
-			out.append("<ui:Label name=\"class-name-%d\" class=\"row-label class-name\" text=\" \" />" % i)
-			out.append("<ui:Button name=\"class-rules-%d\" class=\"link class-rules\" text=\" \" tooltip=\"%s\" />" % [i, _x("The rules that name the class (✓: applies now). Click to show the first rule.")])
-			out.append("<ui:Button name=\"remove-class-%d\" class=\"remove\" text=\"×\" tooltip=\"Remove the class\" />" % i)
-			out.append("</ui:VisualElement>")
+	for i in class_pool:
+		out.append("<ui:VisualElement name=\"block-class-%d\" class=\"block hidden\">" % i)
+		out.append("<ui:VisualElement name=\"row-class-%d\" class=\"row\">" % i)
+		out.append("<ui:Label name=\"class-name-%d\" class=\"row-label class-name\" text=\" \" />" % i)
+		out.append("<ui:Button name=\"class-rules-%d\" class=\"link class-rules\" text=\" \" tooltip=\"%s\" />" % [i, _x("The rules that name the class (✓: applies now). Click to show the first rule.")])
+		out.append("<ui:Button name=\"remove-class-%d\" class=\"remove\" text=\"×\" tooltip=\"Remove the class\" />" % i)
+		out.append("</ui:VisualElement>")
 		out.append("</ui:VisualElement>")
 	out.append("<ui:VisualElement class=\"add-row\">")
-	out.append("<ui:TextField name=\"new-class\" class=\"add-value\" placeholder-text=\"class\" />")
+	out.append("<ui:TextField name=\"new-class\" class=\"add-value\" placeholder-text=\"add a class\" />")
 	out.append("<ui:Button name=\"add-class\" class=\"add-button\" text=\"Add\" />")
 	out.append("</ui:VisualElement>")
 	out.append("</ui:Foldout>")
@@ -400,6 +426,14 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	doc.load_source("".join(out), "res://src/app/ui/__inspector__.uxml", "res://src/app/ui")
 	if offset != Vector2.ZERO:
 		doc.set_scroll_offset("scroll", offset)
+	doc.set_imgui_handler("easing-curve", _draw_easing, _on_easing_input)
+	_easing_shown = ""
+	_placeholder_full.clear()
+	# All fields of a kind have one width: one signal per kind is enough.
+	for field in ["style-0", "attr-0"]:
+		var fc := doc.get_native(field)
+		if fc != null:
+			fc.resized.connect(_refit_placeholders, CONNECT_DEFERRED)
 	# A style field with the focus lists its declarations.
 	for i in COMMON_STYLES.size() + style_pool:
 		var c := doc.get_native("style-%d" % i)
@@ -436,18 +470,28 @@ func _row(out: PackedStringArray, kind: String, i: int, row_class: String) -> vo
 				out.append("<ui:Button name=\"pick-%s\" class=\"helper\" text=\"u\" tooltip=\"Choose a unit\" />" % field)
 			"asset":
 				out.append("<ui:Button name=\"pick-%s\" class=\"helper\" text=\"…\" tooltip=\"Choose a project asset\" />" % field)
+			"easing":
+				out.append("<ui:Button name=\"pick-%s\" class=\"helper\" text=\"∿\" tooltip=\"Choose an easing curve\" />" % field)
 			_:
 				out.append("<ui:VisualElement class=\"helper-space\" />")
 	out.append("<ui:TextField name=\"%s\" value=\"\" placeholder-text=\"\" is-delayed=\"true\" class=\"field\" />" % field)
 	out.append("<ui:Button name=\"remove-%s\" class=\"remove invisible\" text=\"×\" tooltip=\"Remove\" />" % field)
 	out.append("</ui:VisualElement>")
+	# The easing curve of the timing function (milestone 6).
+	if kind == "style" and i < COMMON_STYLES.size() and COMMON_STYLES[i] == "transition-timing-function":
+		out.append("<ui:VisualElement name=\"easing-row\" class=\"easing-row\">")
+		out.append("<ui:IMGUIContainer name=\"easing-curve\" class=\"easing-curve\" tooltip=\"%s\" />" % _x("The easing curve of the first timing function. Click to choose another easing."))
+		out.append("<ui:Label name=\"easing-name\" class=\"easing-name\" text=\" \" />")
+		out.append("</ui:VisualElement>")
 
 
 ## The typed helper of a style property: "color" (a picker), "menu" (the
 ## keywords), "unit", "asset" or "".
 static func helper_kind(property: String) -> String:
 	match EdStyleTypes.kind_of(property):
-		"enum", "easing", "property-list":
+		"easing":
+			return "easing"
+		"enum", "property-list":
 			return "menu"
 		"length", "rotate", "time", "translate":
 			return "unit"
@@ -496,6 +540,7 @@ func _apply(v: Dictionary) -> void:
 					# (a modulate of the control, no restyle).
 					var c: Color = v["colors"].get(prop, Color(0, 0, 0, 0))
 					sw.self_modulate = Color(c.r, c.g, c.b, maxf(c.a, 0.15))
+		_easing_rows(v["easing"])
 		_provenance_rows(v["provenance"], v["targets"])
 		_hide("layout-section", "section", v["layout"] == null)
 		if v["layout"] != null:
@@ -503,23 +548,17 @@ func _apply(v: Dictionary) -> void:
 	_applying = false
 
 
-## The class rows. Block 0 is always displayed and its unused rows are
-## invisible: a display change lays out the whole inspector (about 90 ms on
-## the GDScript path, request R15), and most elements have 0 to 2
-## classes. Without classes, row 0 says so.
+## The class rows: one block per class, displayed only when in use, so the
+## section has the height of its content. A change of the number of
+## classes costs one layout of the inspector (request R15); a selection
+## with as many classes as the one before costs none. Without classes,
+## the add field says so.
 func _class_rows(rows: Array) -> void:
-	var blocks := maxi(1, int(ceil(float(rows.size()) / POOL_STEP)))
-	for b in range(1, _class_pool / POOL_STEP):
-		_hide("block-class-%d" % b, "block", b >= blocks)
 	for i in _class_pool:
-		var used: bool = i < rows.size()
-		var none: bool = i == 0 and rows.is_empty()
-		_hide("row-class-%d" % i, "row", false, "" if used or none else "invisible")
-		_hide("remove-class-%d" % i, "remove", false, "" if used else "invisible")
-		if none:
-			_text("class-name-%d" % i, " ")
-			_text("class-rules-%d" % i, "No classes.")
-		if not used:
+		_hide("block-class-%d" % i, "block", i >= rows.size())
+	_value("new-class", _text_of("new-class"), "add a class (none yet)" if rows.is_empty() else "add a class")
+	for i in _class_pool:
+		if i >= rows.size():
 			continue
 		var r: Dictionary = rows[i]
 		_text("class-name-%d" % i, "." + String(r["name"]))
@@ -592,14 +631,48 @@ func _value(field: String, value: String, placeholder: String = "") -> void:
 	var c := doc.get_native(field) as LineEdit
 	if c == null:
 		return
-	if c.placeholder_text != placeholder:
-		c.placeholder_text = placeholder
-		_silent(field, "placeholder-text", placeholder)
+	_placeholder_full[field] = placeholder
+	_show_placeholder(field, c, placeholder)
+	# The whole value (or the computed value and its origin) as the
+	# tooltip: a long placeholder elides, and a narrow field cuts a value off.
+	var tip := value if not value.is_empty() else placeholder
+	if c.tooltip_text != tip:
+		c.tooltip_text = tip
 	if c.has_focus():
 		return
 	if c.text != value:
 		c.text = value
 	_silent(field, "value", value)
+
+
+## The placeholder at the width of the field: a text that does not fit
+## ends in "...". The tooltip of the field has the whole text.
+func _show_placeholder(field: String, c: LineEdit, full: String) -> void:
+	var shown := EdUi.elided_placeholder(c, full)
+	if c.placeholder_text != shown:
+		c.placeholder_text = shown
+		_silent(field, "placeholder-text", shown)
+
+
+## The fields changed width (a pane resize, the first layout).
+func _refit_placeholders() -> void:
+	for field in _placeholder_full:
+		var c := doc.get_native(field) as LineEdit
+		if c != null:
+			_show_placeholder(field, c, _placeholder_full[field])
+
+
+## The whole placeholder of a field (also while it is elided).
+func placeholder_of(field: String) -> String:
+	return String(_placeholder_full.get(field, ""))
+
+
+## Show the current state of the selection again (the end of a timeline
+## run: the computed values changed without a render).
+func refresh() -> void:
+	if not _pending:
+		_pending = true
+		_rebuild.call_deferred()
 
 
 ## A Toggle value (a model change: the toggle restyles).
@@ -709,11 +782,18 @@ func write_style(property: String, value: String, anchor: Control = null, coales
 
 ## The valid targets of `property` now (fresh: a target freezes the
 ## current source). `removal`: only the targets with a declaration.
-func choices_for(property: String, removal: bool = false) -> Array:
+## `for_states`: the To state of a timeline run (EdStyleTargets.run_choices).
+## Default: the state preview.
+func choices_for(property: String, removal: bool = false, for_states: Variant = null) -> Array:
 	if _node == null or _host == null:
 		return []
-	var entries := _host.explain(_node.id, EdProvenance.longhand_of(property), _states_dict())
-	var out := EdStyleTargets.choices(_session, _node, property, entries, states())
+	var st: Array = states() if for_states == null else for_states
+	var d := {}
+	for s in st:
+		d[s] = true
+	var entries := _host.explain(_node.id, EdProvenance.longhand_of(property), d)
+	var out := EdStyleTargets.choices(_session, _node, property, entries, st) if for_states == null \
+		else EdStyleTargets.run_choices(_session, _node, property, entries, st)
 	if removal:
 		out = out.filter(func(c): return c["kind"] != "new-rule" and c["target"].get("declaration") != null)
 	return out
@@ -749,8 +829,17 @@ func _open_picker(property: String, cs: Array, anchor: Control, then: Callable) 
 
 ## The picker closed without a choice (a click outside): no write.
 func _on_picker_hidden() -> void:
+	var p := pending
 	pending = {}
 	_close_picker()
+	if not p.is_empty():
+		_cancelled(p)
+
+
+func _cancelled(p: Dictionary) -> void:
+	var cb = p.get("cancel")
+	if cb is Callable and (cb as Callable).is_valid():
+		(cb as Callable).call()
 
 
 func _close_picker() -> void:
@@ -792,6 +881,7 @@ func choose(index: int) -> bool:
 	pending = {}
 	_close_picker()
 	if index < 0 or index >= p["choices"].size():
+		_cancelled(p)
 		return false
 	var c: Dictionary = p["choices"][index]
 	_sticky[p["property"]] = c["id"]
@@ -867,6 +957,8 @@ func _on_helper(field: String) -> void:
 			_menu(anchor, ["none"] + assets + [REMOVE_LABEL], _asset_value.bind(prop, anchor))
 		"color":
 			open_color_picker(prop, anchor)
+		"easing":
+			open_easing_picker(prop, anchor)
 
 
 func _menu_value(t: String, prop: String, anchor: Control) -> void:
@@ -959,6 +1051,138 @@ func _computed_value(property: String) -> String:
 
 
 # ---------------------------------------------------------------------------
+# Easing (transition-timing-function)
+# ---------------------------------------------------------------------------
+
+## The curve and the name of the first timing function of `value` (the
+## inline value, else the computed value).
+func _easing_rows(value: String) -> void:
+	var names := EdTransitionValues.split_list(value)
+	var first := "ease" if names.is_empty() else String(names[0])
+	_text("easing-name", first + ("" if names.size() < 2 else " +%d" % (names.size() - 1)))
+	if first != _easing_shown:
+		_easing_shown = first
+		var box := doc.get_element("easing-curve")
+		if box != null:
+			box.queue_redraw()
+
+
+func _draw_easing(box: Control, rect: Rect2) -> void:
+	EdEasingCurve.draw(box, rect.grow(-3), _easing_shown, Color(0.55, 0.8, 1.0))
+
+
+func _on_easing_input(_box: Control, ev: InputEvent) -> void:
+	var mb := ev as InputEventMouseButton
+	if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+		open_easing_picker("transition-timing-function", doc.get_element("easing-curve"))
+
+
+## The easing picker: every Unity easing keyword with its curve. A choice
+## writes the property through the write-target path; `then`, when given,
+## gets the keyword instead (the timeline sets one entry of a list).
+func open_easing_picker(property: String, anchor: Control, then: Callable = Callable(), current: String = "") -> void:
+	_close_picker()
+	if easing_picker == null or not is_instance_valid(easing_picker):
+		easing_picker = EdEasingPicker.new()
+		add_child(easing_picker)
+	var cur := current if not current.is_empty() else _easing_shown
+	var done := func(kw: String) -> void:
+		if then.is_valid():
+			then.call(kw)
+		else:
+			write_style(property, "" if kw == REMOVE_LABEL else kw, anchor)
+	easing_picker.open_at(anchor if anchor != null else self, cur, done, "" if then.is_valid() else REMOVE_LABEL)
+
+
+# ---------------------------------------------------------------------------
+# Write targets of gestures (canvas drags, timeline bars)
+# ---------------------------------------------------------------------------
+
+## The target of a gesture that writes `property` of the selection:
+## {choices, choice, ask}. `choice` is the remembered choice of the
+## property, the only valid target, or (ask: true, the user chooses at the
+## end of the gesture) the default: the winning target, else the inline
+## style, else the first target. `choice` is {} without a valid target.
+## `for_states`: as in choices_for().
+func gesture_target(property: String, for_states: Variant = null) -> Dictionary:
+	_sync_sticky()
+	var cs := choices_for(property, false, for_states)
+	if cs.is_empty():
+		return {"choices": cs, "choice": {}, "ask": false}
+	var sticky = _sticky.get(property)
+	for c in cs:
+		if c["id"] == sticky:
+			return {"choices": cs, "choice": c, "ask": false}
+	if cs.size() == 1:
+		return {"choices": cs, "choice": cs[0], "ask": false}
+	var pick: Dictionary = cs[0]
+	var found := false
+	for c in cs:
+		if c["winner"]:
+			pick = c
+			found = true
+			break
+	if not found:
+		for c in cs:
+			if c["kind"] == "inline":
+				pick = c
+				break
+	return {"choices": cs, "choice": pick, "ask": true}
+
+
+## The choice of the user for `property` (the same memory as the fields).
+func remember_choice(property: String, id: String) -> void:
+	_sync_sticky()
+	_sticky[property] = id
+
+
+func remembered_choice(property: String) -> Variant:
+	_sync_sticky()
+	return _sticky.get(property)
+
+
+## Ask for the target of a gesture: the picker opens at global point `at`.
+## `then(choice)` runs with the choice; `cancelled()` when the picker
+## closes without one.
+func ask_target(property: String, cs: Array, at: Vector2, then: Callable, cancelled: Callable = Callable()) -> void:
+	_close_picker()
+	pending = {"property": property, "choices": cs, "then": then, "cancel": cancelled}
+	var labels := PackedStringArray(cs.map(func(c): return String(c["label"])))
+	labels.append("Cancel")
+	_anchor = Control.new()
+	_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_anchor)
+	_anchor.size = Vector2(maxf(size.x - 24, 300), 18)
+	_anchor.global_position = at
+	picker = UxmlPopupMenu.open(_anchor, labels, -1, doc.theme_path, doc)
+	picker.chosen.connect(choose)
+	picker.popup_hide.connect(_on_picker_hidden, CONNECT_DEFERRED)
+
+
+## Write `value` to the target with id `id` of `property` (fresh targets of
+## the current text). Returns the id of the target for the next write of
+## the same gesture (a new rule is a rule after its first write), or ""
+## when the target is gone (the write is refused).
+func commit_choice(property: String, value: String, id: String, coalesce: String = "", for_states: Variant = null) -> String:
+	var v := value.strip_edges()
+	for c in choices_for(property, v.is_empty(), for_states):
+		if c["id"] == id:
+			if not v.is_empty():
+				var bad = EdStyleTypes.check(property, v)
+				if bad is EdError:
+					command.emit(bad, "inspector")
+					return ""
+			_commit(property, v, c, coalesce)
+			if c["kind"] == "new-rule":
+				var sheet := _session.workspace.uss(c["path"])
+				if sheet != null:
+					return "rule:%s:%d" % [c["path"], sheet.items.size() - 1]
+			return id
+	command.emit(EdError.make("stale-target", "The write target of %s is no longer valid." % property), "inspector")
+	return ""
+
+
+# ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
 
@@ -1002,13 +1226,16 @@ func _on_value_changed(field: String, value: Variant) -> void:
 func set_state(state: String, on: bool) -> void:
 	if _node == null or _host == null:
 		return
-	var s := states()
+	var before := states()
+	var s := before.duplicate()
 	if on and not s.has(state):
 		s.append(state)
 	elif not on:
 		s.erase(state)
 	_host.set_forced(_node.id, s)
 	states_changed.emit(_node.id, _host.forced_of(_node.id))
+	if before != _host.forced_of(_node.id):
+		states_toggled.emit(_node.id, before, _host.forced_of(_node.id))
 	if not _pending:
 		_pending = true
 		_rebuild.call_deferred()
@@ -1040,7 +1267,7 @@ func _on_button(button: String) -> void:
 		"add-class":
 			var c := _text_of("new-class").strip_edges()
 			if not c.is_empty():
-				command.emit(EdProvenance.add_class(_session, _locator(), c), "inspector")
+				_class_edit(EdProvenance.add_class(_session, _locator(), c))
 				_set_text_of("new-class", "")
 			return
 	if not _fields.has(button):
@@ -1053,7 +1280,7 @@ func _on_button(button: String) -> void:
 			show_property(f["name"])
 			write_style(f["name"], "", doc.get_native(button))
 		"class":
-			command.emit(EdProvenance.remove_class(_session, _locator(), f["name"]), "inspector")
+			_class_edit(EdProvenance.remove_class(_session, _locator(), f["name"]))
 		"class-rules":
 			for c in classes:
 				if c["name"] == f["name"] and not c["rules"].is_empty():
@@ -1063,6 +1290,27 @@ func _on_button(button: String) -> void:
 			open_provenance(int(f["name"]))
 		"pick":
 			_on_helper(button)
+
+
+## A class edit: the command, then classes_toggled (the timeline plays
+## the transitions of the change).
+func _class_edit(r: Variant) -> void:
+	var id := _node.id
+	var before := author_classes(_node)
+	command.emit(r, "inspector")
+	if r is EdTransaction and _session != null and _session.tree() != null:
+		var nodes: Array = _session.tree().nodes
+		var n: EdUxmlNode = nodes[id] if id < nodes.size() else null
+		var after := author_classes(n)
+		if after != before:
+			classes_toggled.emit(id, before, after)
+
+
+static func author_classes(n: EdUxmlNode) -> Array:
+	if n == null:
+		return []
+	var cls = n.get_attribute("class")
+	return [] if cls == null else Array(String(cls).split(" ", false))
 
 
 ## Show the source of declaration row `i` of the list (or select the

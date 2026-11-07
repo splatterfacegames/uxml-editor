@@ -31,6 +31,9 @@ func _run() -> void:
 			UxmlDocument.use_native_layout = false
 	# Journals of the test projects go to a directory of their own.
 	EdEditorState.default_recovery_base = "user://test-recovery"
+	EdSettings.default_path = "user://test-settings.cfg"
+	if FileAccess.file_exists(EdSettings.default_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(EdSettings.default_path))
 	var logger := ErrorCounter.new()
 	OS.add_logger(logger)
 	var broken := _compile_all("res://src")
@@ -61,6 +64,7 @@ func _run() -> void:
 		if methods.is_empty():
 			continue
 		var file_failed := 0
+		var file_started := Time.get_ticks_msec()
 		for mname in methods:
 			var tc: EdTestCase = script.new()
 			tc.tree = self
@@ -77,7 +81,8 @@ func _run() -> void:
 				file_failed += 1
 				for msg in tc.failures:
 					failures.append("%s: %s" % [tc.current, msg])
-		print("%-44s %3d tests  %s" % [f.get_basename(), methods.size(), "ok" if file_failed == 0 else "%d FAILED" % file_failed])
+		print("%-44s %3d tests  %-9s %7.1f s" % [f.get_basename(), methods.size(), "ok" if file_failed == 0 else "%d FAILED" % file_failed,
+			(Time.get_ticks_msec() - file_started) / 1000.0])
 	for b in broken:
 		failures.push_front("%s: does not compile" % b)
 		failed += 1
@@ -89,6 +94,8 @@ func _run() -> void:
 
 
 static func _rm(dir: String) -> void:
+	if not DirAccess.dir_exists_absolute(dir):
+		return
 	for f in DirAccess.get_files_at(dir):
 		DirAccess.remove_absolute(dir + "/" + f)
 	for d in DirAccess.get_directories_at(dir):

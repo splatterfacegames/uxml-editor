@@ -16,6 +16,7 @@ extends Control
 ##   --recovery-dir=<dir> directory of the recovery journals (default
 ##                        user://recovery)
 ##   --watch-interval=<s> seconds between disk checks (default 2; 0: off)
+##   --settings=<file>    per-user settings file (default user://settings.cfg)
 ##   --ready-file=<path>  write this file after the options ran (tests)
 ##   --exit-after=<s>     quit after this many seconds (tests)
 ##   --demo=<name>        stage a documentation state before the screenshot
@@ -46,6 +47,9 @@ const CONTEXT_MENU := [
 	["Wrap in VisualElement", "wrap"], ["Unwrap", "unwrap"], ["Move up", "move-up"], ["Move down", "move-down"],
 	["Rename element type", "rename"],
 ]
+## The resizable panes (TwoPaneSplitView). Their sizes are per-user
+## settings (EdSettings, section "layout").
+const SPLITS := ["main-split", "left-split", "hier-split", "right-split", "center-split", "lower-split", "source-split"]
 const SEVERITY_MENU := [["All severities", ""], ["Errors", "error"], ["Warnings", "warning"], ["Info", "info"]]
 const SOURCE_MENU := [["All sources", ""], ["godot-uxml (import)", "godot-uxml"], ["Editor", "editor"]]
 
@@ -55,6 +59,8 @@ var canvas: EdCanvasView
 var source: EdSourceView
 var inspector: EdInspectorView
 var palette: EdPaletteView
+var timeline: EdTimelineView
+var settings: EdSettings
 var drag: EdDragController
 var layout: EdLayoutController
 var source_path := ""
@@ -74,6 +80,8 @@ var _diag_files: Array = []
 var tabs: EdTabBar
 ## Disk check timer (external changes).
 var watch_timer: Timer
+## --watch-interval=0: no disk check on a timer.
+var _watch_off := false
 ## Questions that wait for the dialog: [{text, ok, cancel, on_ok, on_cancel}].
 var _asks: Array = []
 var _asking: ConfirmationDialog = null
@@ -113,6 +121,8 @@ func _ready() -> void:
 	shell.load_document(SHELL, "res://src/app/ui")
 	for d in shell.diagnostics:
 		push_warning("editor shell: " + UxmlDiagnostic.format(d))
+	settings = EdSettings.new(_settings_arg())
+	_restore_splits()
 
 	canvas = EdCanvasView.new()
 	_mount(canvas, "canvas-host")
@@ -139,7 +149,20 @@ func _ready() -> void:
 	shell.set_menu_items("diag-source-menu", SOURCE_MENU.map(func(e): return e[0]), func(i, t): _set_diag_filter("source", SOURCE_MENU[i][1], "diag-source-menu", t))
 	canvas.picked.connect(_on_canvas_picked)
 	canvas.view_changed.connect(_update_zoom_label)
+	timeline = EdTimelineView.new()
+	timeline.name = "Timeline"
+	add_child(timeline)
+	timeline.attach(shell, state, canvas.host, inspector, settings)
+	timeline.status.connect(func(msg, err): state.status.emit(msg, err))
+	timeline.select_requested.connect(func(id): state.select_id(id, "timeline"))
+	timeline.seeked.connect(canvas.queue_redraw)
+	timeline.settled.connect(inspector.refresh)
+	inspector.states_toggled.connect(timeline.states_toggled)
+	inspector.classes_toggled.connect(timeline.classes_toggled)
 	layout = EdLayoutController.new(state, canvas)
+	layout.inspector = inspector
+	# A canvas gesture measures the source state: the timeline run ends.
+	canvas.gesture_started.connect(func(_h): timeline.stop())
 	canvas.gesture_started.connect(layout.begin)
 	canvas.gesture_moved.connect(layout.update)
 	canvas.gesture_finished.connect(layout.finish)
@@ -196,8 +219,38 @@ func _ready() -> void:
 	if state.session == null:
 		inspector.show_selection(null, null, null)
 	get_window().focus_entered.connect(_on_window_focus)
-	if watch_timer.wait_time > 0:
+	if not _watch_off:
 		watch_timer.start()
+
+
+## The --settings=<file> option (read before the other options: the pane
+## sizes apply before the first layout).
+static func _settings_arg() -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--settings="):
+			return a.substr(11)
+	return ""
+
+
+## The pane sizes of the last session.
+func _restore_splits() -> void:
+	for sp in SPLITS:
+		var d = settings.get_value("layout", sp)
+		if d != null and (d is float or d is int):
+			shell.set_split_dimension(sp, clampf(float(d), 40.0, 4000.0))
+
+
+## Keep the pane sizes (after a drag of a split line, and at close).
+func save_splits() -> void:
+	var changed := false
+	for sp in SPLITS:
+		if shell.get_element(sp) == null:
+			continue
+		var d := snappedf(shell.get_split_dimension(sp), 1.0)
+		if settings.set_value("layout", sp, d):
+			changed = true
+	if changed:
+		settings.save()
 
 
 ## Disable the native core of godot-uxml (the path of the web export and
@@ -238,7 +291,12 @@ func _parse_args() -> void:
 	if _args.has("recovery-dir"):
 		state.recovery_base = String(_args["recovery-dir"])
 	if _args.has("watch-interval"):
-		watch_timer.wait_time = maxf(0.0, float(_args["watch-interval"]))
+		var interval := float(_args["watch-interval"])
+		if interval > 0.0:
+			watch_timer.wait_time = interval
+		else:
+			watch_timer.stop()
+			_watch_off = true
 	if _args.has("exit-after"):
 		get_tree().create_timer(float(_args["exit-after"])).timeout.connect(func(): get_tree().quit(3))
 	if _args.has("preset"):
@@ -293,6 +351,8 @@ func _screenshot(path: String) -> void:
 # ---------------------------------------------------------------------------
 
 func _on_button(element_name: String) -> void:
+	if timeline.on_button(element_name):
+		return
 	match element_name:
 		"open-button":
 			_dialog.popup_centered_ratio(0.6)
@@ -444,6 +504,8 @@ func _input(ev: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	var mb := ev as InputEventMouseButton
+	if mb != null and not mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+		save_splits.call_deferred()
 	if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT and not canvas.preview:
 		var tree_c := shell.get_element("hierarchy-tree")
 		if tree_c != null and tree_c.get_global_rect().has_point(mb.global_position):
@@ -641,6 +703,8 @@ func _on_items_chosen(list_name: String, indices: Array) -> void:
 
 
 func _on_shell_value(element_name: String, value: Variant) -> void:
+	if timeline.on_value(element_name, value):
+		return
 	match element_name:
 		"palette-search":
 			palette.set_query(String(value))
@@ -661,6 +725,7 @@ func _on_grid(index: int, text: String) -> void:
 func set_preview(on: bool) -> void:
 	if canvas.preview == on:
 		return
+	timeline.stop()
 	canvas.set_preview(on)
 	var t := shell.get_element_model("preview-toggle")
 	if t != null and str(t.get_attribute("value")) != ("true" if on else "false"):
@@ -779,6 +844,7 @@ func _on_external_conflicts(paths: Array) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		source.flush()
+		save_splits()
 		state.close_project()
 
 
@@ -830,6 +896,7 @@ func _on_project_opened() -> void:
 
 
 func _on_document_opened(path: String) -> void:
+	timeline.reset()
 	_update_canvas_header()
 	_refresh_tabs()
 	if path.is_empty():
@@ -897,6 +964,7 @@ func _on_rendered() -> void:
 	_render_diags[canvas.host.entry_path] = canvas.host.diagnostics.duplicate()
 	_refresh_hierarchy()
 	_refresh_diagnostics()
+	timeline.rendered()
 	_on_selection_changed("render")
 
 
@@ -1070,6 +1138,7 @@ func _on_selection_changed(origin: String) -> void:
 	if origin != "source":
 		_mark_selection_in_source(origin != "render")
 	inspector.show_selection(state.session, n, canvas.host, nodes.size())
+	timeline.show_selection(n)
 
 
 func _mark_selection_in_source(reveal: bool) -> void:

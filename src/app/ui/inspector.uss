@@ -35,6 +35,7 @@
     -unity-font-style: bold;
     color: rgb(230, 230, 230);
     overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .subtitle {
@@ -43,6 +44,7 @@
     padding-left: 8px;
     margin-bottom: 6px;
     overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .section {
@@ -65,16 +67,20 @@
 }
 
 .type-field > .unity-label {
-    min-width: 120px;
-    width: 120px;
+    min-width: 146px;
+    width: 146px;
 }
 
+/* A long name (transition-timing-function) elides; the tooltip shows it. */
 .row-label {
-    width: 124px;
-    min-width: 124px;
+    width: 45%;
+    max-width: 150px;
+    min-width: 56px;
+    flex-shrink: 0;
     height: 18px;
     padding-left: 4px;
     overflow: hidden;
+    text-overflow: ellipsis;
     -unity-text-align: middle-left;
 }
 
@@ -97,7 +103,8 @@
 }
 
 .add-name {
-    width: 130px;
+    width: 40%;
+    max-width: 156px;
     flex-shrink: 0;
 }
 
@@ -111,6 +118,7 @@
 }
 
 .hint {
+    white-space: normal;
     color: rgb(140, 140, 140);
     padding-left: 4px;
     margin-top: 2px;
@@ -121,6 +129,7 @@
 .readout {
     height: 18px;
     overflow: hidden;
+    text-overflow: ellipsis;
     padding-left: 4px;
     color: rgb(200, 200, 200);
 }
@@ -170,12 +179,13 @@
     border-width: 0;
     -unity-text-align: middle-left;
     overflow: hidden;
+    text-overflow: ellipsis;
     color: rgb(200, 200, 200);
 }
 
 .class-name {
-    width: 96px;
-    min-width: 96px;
+    width: 120px;
+    min-width: 120px;
     color: rgb(130, 190, 255);
 }
 
@@ -185,6 +195,8 @@
     margin-left: 0;
 }
 
+/* A declaration line: the status and the value first; a long origin
+   elides at the end, and the tooltip shows the whole line. */
 .prov {
     flex-shrink: 0;
 }
@@ -208,4 +220,29 @@
 
 .targets {
     color: rgb(160, 160, 160);
+}
+
+/* Milestone 6: the easing curve of transition-timing-function. */
+.easing-row {
+    flex-direction: row;
+    align-items: center;
+    padding-right: 4px;
+}
+
+.easing-curve {
+    width: 120px;
+    height: 48px;
+    margin: 2px 4px 4px 154px;
+    background-color: rgb(42, 42, 42);
+    border-width: 1px;
+    border-color: rgb(30, 30, 30);
+}
+
+.easing-name {
+    flex-grow: 1;
+    flex-basis: 0;
+    height: 18px;
+    color: rgb(160, 160, 160);
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

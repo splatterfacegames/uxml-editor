@@ -22,12 +22,21 @@ extends RefCounted
 ##
 ## Values are written in px. A gesture (drag, a run of arrow keys) passes
 ## one coalesce key; the history merges its transactions into one step.
+##
+## A gesture can name the target of a property instead (`targets`, the
+## write-target choice of the user, ADR 0004): {kind: "rule", path, item},
+## {kind: "inline"} or {kind: "new-rule", path, selector}. A new rule that
+## several properties of one plan name is inserted once; the later
+## properties go into it.
 
 const MOVE_PROPS := ["left", "top", "margin-left", "margin-top"]
 
 
-## `writes`: [{locator, property, value: float}].
-static func plan(session: EdDocumentSession, writes: Array, style_of: Callable, tx_label: String, coalesce_key: String = "") -> Variant:
+## `writes`: [{locator, property, value: float}]. `targets`: property ->
+## a target for the primary element (`primary`, a locator) that replaces
+## the target of the winner.
+static func plan(session: EdDocumentSession, writes: Array, style_of: Callable, tx_label: String, coalesce_key: String = "",
+		targets: Dictionary = {}, primary: Variant = null) -> Variant:
 	if writes.is_empty():
 		return EdError.make("invalid-selection", "A layout edit needs at least one element.")
 	var planned: Array = []
@@ -38,12 +47,16 @@ static func plan(session: EdDocumentSession, writes: Array, style_of: Callable, 
 			return EdError.make("unresolved-locator", "A layout target no longer resolves uniquely.")
 		if not is_finite(float(w["value"])):
 			return EdError.make("invalid-value", "Layout values must be finite numbers.")
-		var target = choose_target(node, w["property"], style_of.call(node))
+		var target = null
+		if targets.has(w["property"]) and (primary == null or session.resolve(primary) == node):
+			target = targets[w["property"]]
+		else:
+			target = choose_target(node, w["property"], style_of.call(node))
 		if target is EdError:
 			return target
 		var value := format_px(float(w["value"]))
 		var key := JSON.stringify([target["kind"], target.get("path", ""), target.get("item", -1), w["property"],
-			"" if target["kind"] == "rule" else str(node.open_start)])
+			"" if target["kind"] == "rule" else str(node.open_start), target.get("selector", "")])
 		if seen.has(key):
 			if seen[key] != value:
 				return EdError.make("ambiguous-source", "Selected elements need different %s values through one shared rule." % w["property"])
@@ -51,8 +64,9 @@ static func plan(session: EdDocumentSession, writes: Array, style_of: Callable, 
 		seen[key] = value
 		planned.append({"locator": EdLocator.create(node), "property": w["property"], "value": value, "target": target})
 	var steps: Array = []
+	var created := {}
 	for p in planned:
-		steps.append(_step.bind(p))
+		steps.append(_step.bind(p, created))
 	var tx = EdStepComposer.compose(session, "layout:write", tx_label, steps)
 	if tx is EdTransaction:
 		tx.coalesce_key = coalesce_key
@@ -60,14 +74,28 @@ static func plan(session: EdDocumentSession, writes: Array, style_of: Callable, 
 	return tx
 
 
-static func _step(shadow: EdDocumentSession, p: Dictionary) -> Variant:
+## `created`: "path|selector" -> the item index of a new rule that an
+## earlier step of the plan inserted.
+static func _step(shadow: EdDocumentSession, p: Dictionary, created: Dictionary) -> Variant:
 	var t: Dictionary = p["target"]
 	var prop: String = p["property"]
+	if t["kind"] == "new-rule":
+		var key := "%s|%s" % [t["path"], t["selector"]]
+		if created.has(key):
+			var nt = EdUssCommands.rule_target(shadow.workspace, t["path"], created[key], prop)
+			if nt is EdError:
+				return nt
+			return EdUssCommands.set_declaration(shadow.workspace, nt, p["value"])
+		var sheet := shadow.workspace.uss(t["path"])
+		if sheet == null:
+			return EdError.make("stale-target", "Stylesheet %s is no longer open." % t["path"])
+		created[key] = sheet.items.size()
+		return EdUssCommands.insert_rule(shadow.workspace, EdUssCommands.new_rule_target(shadow.workspace, t["path"], t["selector"], prop), p["value"])
 	if t["kind"] == "rule":
 		var rt = EdUssCommands.rule_target(shadow.workspace, t["path"], t["item"], prop)
 		if rt is EdError:
 			return rt
-		var ok = _check_index(rt["declaration_index"], t["decl_index"], prop)
+		var ok = _check_index(rt["declaration_index"], int(t.get("decl_index", -1)), prop)
 		if ok is EdError:
 			return ok
 		return EdUssCommands.set_declaration(shadow.workspace, rt, p["value"])
@@ -77,8 +105,8 @@ static func _step(shadow: EdDocumentSession, p: Dictionary) -> Variant:
 	var it = EdUssCommands.inline_target(shadow, EdLocator.create(node), prop)
 	if it is EdError:
 		return it
-	if t["decl_index"] >= 0:
-		var ok = _check_index(it["declaration_index"], t["decl_index"], prop)
+	if int(t.get("decl_index", -1)) >= 0:
+		var ok = _check_index(it["declaration_index"], int(t["decl_index"]), prop)
 		if ok is EdError:
 			return ok
 	return EdUssCommands.set_inline_style(shadow, it, p["value"])
@@ -112,6 +140,20 @@ static func _target_from(origin: Dictionary, property: String, node: EdUxmlNode)
 			var inner: Dictionary = origin.get("origin", {})
 			if inner.get("kind") == "rule" or inner.get("kind") == "inline":
 				return EdError.make("ambiguous-source", "%s of %s is inherited from an authored value; set it on the element in the inspector." % [property, node.local])
+	return {"kind": "inline", "decl_index": -1}
+
+
+## The layout target of a write-target choice (EdStyleTargets): the
+## location of the rule, the inline style or the new rule. A plan finds
+## the declaration again in the current text, so the target stays valid
+## through the steps of a gesture.
+static func target_of_choice(choice: Dictionary) -> Dictionary:
+	match String(choice.get("kind", "")):
+		"rule":
+			var t: Dictionary = choice["target"]
+			return {"kind": "rule", "path": t["path"], "item": int(t["item_index"]), "decl_index": -1}
+		"new-rule":
+			return {"kind": "new-rule", "path": choice["path"], "selector": choice["target"]["selector"]}
 	return {"kind": "inline", "decl_index": -1}
 
 

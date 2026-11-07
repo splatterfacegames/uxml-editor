@@ -8,6 +8,7 @@ extends SceneTree
 ##   --fixture=<name>    menu (default), a fixture project, or large (a
 ##                       generated document of about 600 elements)
 ##   --frames=<n>        frames per scenario (default 60)
+##   --only-timeline     skip the scenarios before the timeline
 ##
 ## Each scenario runs the real editor scene and measures the wall time of
 ## each frame (input, process, layout and draw; the headless renderer
@@ -43,7 +44,10 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var fixture := "menu"
+	var only_timeline := false
 	for a in OS.get_cmdline_user_args():
+		if a == "--only-timeline":
+			only_timeline = true
 		if a == "--gdscript":
 			UxmlParser.use_native = false
 			UssParser.use_native = false
@@ -63,6 +67,7 @@ func _run() -> void:
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	_dir = ProjectSettings.globalize_path("user://bench-%d" % Time.get_ticks_usec())
 	EdEditorState.default_recovery_base = _dir + "-recovery"
+	EdSettings.default_path = _dir + "-settings.cfg"
 	var entry := MENU
 	if fixture == "large":
 		entry = _make_large(_dir)
@@ -85,12 +90,22 @@ func _run() -> void:
 	await _wait(10)
 	_counts = _now_counts()
 
+	if only_timeline:
+		await _timeline_scenarios(entry)
+		_print_table()
+		await _finish()
+		return
 	await _measure("idle", func(_i): pass)
 	await _measure("hover canvas", func(i): _move(_rect_point(_m.canvas.get_global_rect(), i)))
 	await _measure("hover shell (hierarchy)", func(i): _move(_rect_point(_m.shell.get_element("hierarchy-tree").get_global_rect(), i)))
 	_move(Vector2(-100, -100))
 	var nodes := _drawn()
 	await _measure("selection (one change per frame)", func(i): _m.state.select_node(nodes[i % nodes.size()], "canvas"))
+	# The same number of classes: the Classes section keeps its height, so
+	# the inspector needs no layout.
+	var one_class: Array = nodes.filter(func(n): return EdInspectorView.author_classes(n).size() == 1)
+	if one_class.size() >= 2:
+		await _measure("selection, same number of classes", func(i): _m.state.select_node(one_class[i % one_class.size()], "canvas"))
 	_m.state.select_node(nodes[0], "canvas")
 	await _wait(3)
 	await _measure("idle with selection", func(_i): pass)
@@ -125,17 +140,90 @@ func _run() -> void:
 	print("render and patch times during the drag (ms): %s" % ", ".join(_render_ms.map(func(x): return "%.1f" % x)))
 	_button(c + Vector2(4 + _frames, 2 + _frames * 0.5), false)
 	await _wait(3)
+	# The drag ends with the write-target question: keep the inline style.
+	_m.inspector.choose_id("inline")
+	await _wait(3)
 	print("history after the drag: %s" % _m.state.workspace.history.undo_label())
+	await _timeline_scenarios(entry)
+	_print_table()
+	await _finish()
 
+
+func _print_table() -> void:
 	print("")
 	print("%-36s %8s %8s %8s %8s %8s %8s" % ["scenario (ms per frame)", "median", "p95", "max", "renders", "patches", "builds"])
 	for r in _rows:
 		print("%-36s %8.2f %8.2f %8.2f %8d %8d %8d" % r)
+
+
+func _finish() -> void:
 	_m.queue_free()
 	await _wait(2)
 	_rm(_dir)
 	_rm(_dir + "-recovery")
 	quit(0)
+
+
+## The timeline: three transitions on the first Button that a state change
+## starts, from one rule per class of the button (the rules go in with one
+## edit, so the scenarios before them do not change).
+func _timeline_scenarios(entry: String) -> void:
+	var target: EdUxmlNode = null
+	for n in _drawn():
+		if n.local == "Button":
+			target = n
+			break
+	_m.state.select_node(target, "canvas")
+	await _wait(3)
+	var cls := String(target.get_attribute("class")).split(" ", false)[-1]
+	var uss := entry.get_basename() + ".uss"
+	var at := _m.state.workspace.text(uss).length()
+	var rules := ".%s {\n  transition-property: background-color, min-width, opacity;\n  transition-duration: 0.5s, 1s, 0.3s;\n  transition-delay: 0s, 0.2s, 0.4s;\n  transition-timing-function: ease-in-out, ease-out-bounce, linear;\n}\n.%s:hover {\n  background-color: #c0392b;\n  min-width: 320px;\n  opacity: 0.6;\n}\n" % [cls, cls]
+	_m.state.execute(EdTransaction.make("bench", "Transition rules", uss, [{"start": at, "end": at, "replacement": rules}]), "bench")
+	await _wait(5)
+	target = _m.state.session.tree().nodes[target.id]
+	_m.state.select_node(target, "canvas")
+	await _wait(3)
+	var tl := _m.timeline
+	var classes := EdInspectorView.author_classes(target)
+	tl.run({"classes": classes, "states": []}, {"classes": classes, "states": ["hover"]})
+	await _wait(3)
+	print("timeline: %d tracks, %.2f s, element %s" % [tl.model.tracks.size(), tl.model.length(), target.local])
+	await _measure("timeline: idle, armed", func(_i): pass)
+	# Scrub: a held mouse drag over the ruler, one seek per frame, through
+	# the window input.
+	var ruler_y: float = tl._area().position.y + EdTimelineView.RULER_H * 0.5
+	var x_of := func(i: int) -> Vector2:
+		var t: float = tl.model.length() * float(i % 40) / 40.0
+		return tl.to_global(Vector2(tl.time_x(t), ruler_y))
+	_button(x_of.call(0), true)
+	await _wait(1)
+	var seeks0: int = tl.seeks
+	await _measure("timeline: scrub (one seek per frame)", func(i): _move(x_of.call(i + 1), true))
+	print("seeks during the scrub: %d" % (tl.seeks - seeks0))
+	_button(x_of.call(_frames), false)
+	await _wait(3)
+	tl.set_loop(true)
+	tl.toggle_play()
+	seeks0 = tl.seeks
+	await _measure("timeline: play with loop", func(_i): pass)
+	print("seeks during playback: %d" % (tl.seeks - seeks0))
+	tl.toggle_play()
+	tl.set_loop(false)
+	# A bar drag: one write per frame through the write-target path.
+	await _wait(3)
+	var r: Rect2 = tl.bar_rect(0)
+	var bar := tl.to_global(r.position + Vector2(r.size.x * 0.5, r.size.y * 0.5))
+	_button(bar, true)
+	await _wait(1)
+	await _measure("timeline: drag a bar (one edit per frame)", func(i): _move(bar + Vector2(float(i % 20) * 3.0 + 2.0, 0), true))
+	_button(bar, false)
+	await _wait(3)
+	_m.inspector.choose(0)
+	await _wait(3)
+	print("history after the bar drag: %s" % _m.state.workspace.history.undo_label())
+	tl.stop()
+	await _wait(2)
 
 
 ## Run `step` before each of `_frames` frames (or for `seconds` of frames)

@@ -12,6 +12,16 @@ extends RefCounted
 ## (or NUDGE_FRAMES frames, for slow renders) after the render of the
 ## previous one, the selection stays the same and no other edit comes
 ## between them.
+##
+## Write targets (ADR 0004). A drag writes each property to the target that
+## the inspector would use (EdInspectorView.gesture_target): the target
+## the user chose for the property before (the same memory as the
+## inspector fields), the only valid target, or, when more than one target
+## is valid, the winning target during the drag and the write-target
+## picker at the end of the drag. A choice of another target writes the
+## end of the drag there instead (one undo step); Cancel undoes the drag.
+## Arrow-key nudges use a remembered choice and else the winner, without
+## the picker.
 
 const NUDGE_PAUSE := 0.8
 const NUDGE_FRAMES := 2
@@ -20,6 +30,9 @@ const GRIDS := [0, 1, 2, 4, 5, 8, 10, 16, 20]
 
 var state: EdEditorState
 var canvas: EdCanvasView
+## The inspector: write targets of the selection and the picker (null: the
+## winners, as in milestone 3).
+var inspector: EdInspectorView = null
 var snap_enabled := true
 var grid := 8
 
@@ -64,7 +77,9 @@ func begin(handle: String) -> void:
 		"style": {id: host.style_facts(id)},
 		"targets": EdSnap.targets(parent_rect, host.sibling_rects(id)),
 		"label": ("Move %s" if handle == "move" else "Resize %s") % n.local,
-		"steps": 0,
+		"steps": 0, "locator": EdLocator.create(n),
+		# property -> {choice, ask, choices} (EdInspectorView.gesture_target)
+		"choices": {}, "writes": [], "rules": {},
 	}
 	_error_shown = false
 
@@ -84,7 +99,9 @@ func update(handle: String, delta: Vector2, keep_ratio: bool, no_snap: bool) -> 
 	if writes is EdError:
 		_report(writes)
 		return
-	_queue({"writes": writes, "style": _gesture["style"], "label": _gesture["label"], "key": _gesture["key"]})
+	_gesture["writes"] = writes
+	_queue({"writes": writes, "style": _gesture["style"], "label": _gesture["label"], "key": _gesture["key"],
+		"targets": _targets_for(writes), "primary": _gesture["locator"]})
 
 
 func finish(cancelled: bool) -> void:
@@ -92,11 +109,100 @@ func finish(cancelled: bool) -> void:
 	canvas.guides = {}
 	if _gesture.is_empty():
 		return
-	var key: String = _gesture["key"]
+	var g := _gesture
+	var key: String = g["key"]
 	_gesture = {}
 	if cancelled and state.workspace.history.undo_key() == key:
 		state.undo()
 	state.workspace.history.break_coalescing()
+	if not cancelled and state.workspace.history.undo_key() == key:
+		_ask_targets(g)
+
+
+## The write targets of the gesture's properties, fixed at their first
+## write: property -> layout target (EdLayoutCommands.target_of_choice).
+func _targets_for(writes: Array) -> Dictionary:
+	var out := {}
+	if inspector == null:
+		return out
+	var cs: Dictionary = _gesture["choices"]
+	for w in writes:
+		var prop: String = w["property"]
+		if not cs.has(prop):
+			cs[prop] = inspector.gesture_target(prop)
+		var choice: Dictionary = cs[prop]["choice"]
+		if not choice.is_empty():
+			out[prop] = _gesture["rules"].get(prop, EdLayoutCommands.target_of_choice(choice))
+	return out
+
+
+## `targets` named a new rule and a plan with them ran: the rule exists.
+## The later steps of the gesture write to the rule, and the memory of the
+## property names the rule. Returns property -> the rule target.
+func _new_rules_written(targets: Dictionary) -> Dictionary:
+	var out := {}
+	for prop in targets:
+		var t: Dictionary = targets[prop]
+		if t["kind"] != "new-rule":
+			continue
+		var sheet := state.workspace.uss(t["path"])
+		if sheet == null:
+			continue
+		var item: int = sheet.items.size() - 1
+		out[prop] = {"kind": "rule", "path": t["path"], "item": item, "decl_index": -1}
+		if inspector != null:
+			inspector.remember_choice(prop, "rule:%s:%d" % [t["path"], item])
+	return out
+
+
+## After a drag: when a property had more than one valid target and no
+## remembered choice, the picker asks. The choice is remembered for every
+## asked property that offers it; another target than the one of the drag
+## gets the end of the drag instead (the drag step is undone). Cancel
+## undoes the drag.
+func _ask_targets(g: Dictionary) -> void:
+	if inspector == null:
+		return
+	var asked: Array = []
+	for prop in g["choices"]:
+		if g["choices"][prop]["ask"]:
+			asked.append(prop)
+	if asked.is_empty():
+		return
+	var first: String = asked[0]
+	var key: String = g["key"]
+	var at := canvas.get_global_mouse_position()
+	inspector.ask_target(first, g["choices"][first]["choices"], at, func(c: Dictionary) -> void:
+		var targets := {}
+		var changed := false
+		for prop in g["choices"]:
+			var entry: Dictionary = g["choices"][prop]
+			var pick: Dictionary = entry["choice"]
+			if entry["ask"]:
+				for o in entry["choices"]:
+					if o["id"] == c["id"]:
+						pick = o
+				inspector.remember_choice(prop, pick["id"])
+				if pick["id"] != entry["choice"]["id"]:
+					changed = true
+			targets[prop] = EdLayoutCommands.target_of_choice(pick)
+		if not changed:
+			return
+		if state.workspace.history.undo_key() == key:
+			state.undo()
+		var tx = EdLayoutCommands.plan(state.session, g["writes"], func(node: EdUxmlNode): return g["style"].get(node.id, {}),
+			g["label"], "", targets, g["locator"])
+		if tx is EdError:
+			_error_shown = false
+			_report(tx)
+			return
+		state.execute(tx, "canvas")
+		state.workspace.history.break_coalescing()
+		_new_rules_written(targets),
+		func() -> void:
+			if state.workspace.history.undo_key() == key:
+				state.undo()
+				state.status.emit("Drag undone: no write target chosen.", false))
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +230,8 @@ func nudge(delta: Vector2) -> void:
 			_report(w)
 			return
 		writes.append_array(w)
-	_queue({"writes": writes, "style": _nudge["style"], "label": _nudge["label"], "key": _nudge["key"]})
+	_queue({"writes": writes, "style": _nudge["style"], "label": _nudge["label"], "key": _nudge["key"],
+		"targets": _nudge["targets"], "primary": _nudge["primary"]})
 
 
 func _start_nudge() -> void:
@@ -148,7 +255,17 @@ func _start_nudge() -> void:
 	if bases.is_empty():
 		return
 	_counter += 1
+	# One element: a remembered choice of the inspector applies.
+	var targets := {}
+	if inspector != null and nodes.size() == 1:
+		for prop in EdLayoutCommands.MOVE_PROPS:
+			var id = inspector.remembered_choice(prop)
+			if id != null:
+				for c in inspector.choices_for(prop):
+					if c["id"] == id:
+						targets[prop] = EdLayoutCommands.target_of_choice(c)
 	_nudge = {"bases": bases, "style": styles, "delta": Vector2.ZERO, "at": 0.0, "frame": 0,
+		"targets": targets, "primary": EdLocator.create(nodes[0]),
 		"selection": state.selection.duplicate(true), "key": "nudge:%d" % _counter,
 		"label": "Nudge %s" % nodes[0].local if nodes.size() == 1 else "Nudge %d elements" % nodes.size()}
 
@@ -194,13 +311,17 @@ func _flush() -> void:
 	var step: Dictionary = _pending
 	_pending = null
 	var styles: Dictionary = step["style"]
-	var tx = EdLayoutCommands.plan(state.session, step["writes"], func(node: EdUxmlNode): return styles.get(node.id, {}), step["label"], step["key"])
+	var tx = EdLayoutCommands.plan(state.session, step["writes"], func(node: EdUxmlNode): return styles.get(node.id, {}), step["label"], step["key"],
+		step.get("targets", {}), step.get("primary"))
 	if tx is EdError:
 		_report(tx)
 		return
 	if (tx as EdTransaction).is_empty():
 		return
 	state.execute(tx, "canvas")
+	var rules := _new_rules_written(step.get("targets", {}))
+	if not _gesture.is_empty() and _gesture["key"] == step["key"]:
+		_gesture["rules"].merge(rules, true)
 
 
 func _report(e: EdError) -> void:

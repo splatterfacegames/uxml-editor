@@ -4,6 +4,12 @@ extends EdAppTestCase
 ## edit.
 
 const RECOVERED := "Recovered after a kill"
+## The child editor can start slowly on a loaded machine: the wait ends
+## as soon as the child is ready, so a long limit costs nothing when all
+## is well. The child ends itself only long after the wait, so a test
+## that stops early leaves no process behind.
+const CHILD_START_MS := 600000
+const CHILD_LIFETIME_S := 900
 
 var _rdir := ""
 
@@ -125,7 +131,7 @@ func test_edits_survive_a_killed_editor_process() -> void:
 	var disk := FileAccess.get_file_as_bytes(dir + "/" + MENU)
 	var args := ["--headless", "--path", ProjectSettings.globalize_path("res://"), "--",
 		"--project=" + dir, "--open=" + MENU, "--select=play-button", "--script-edit=text=" + RECOVERED,
-		"--recovery-dir=" + rdir, "--ready-file=" + ready, "--exit-after=90", "--watch-interval=0"]
+		"--recovery-dir=" + rdir, "--ready-file=" + ready, "--exit-after=%d" % CHILD_LIFETIME_S, "--watch-interval=0"]
 	if not UxmlParser.use_native:
 		args.append("--gdscript")
 	var pid := OS.create_process(OS.get_executable_path(), args)
@@ -133,9 +139,13 @@ func test_edits_survive_a_killed_editor_process() -> void:
 	if pid <= 0:
 		return
 	var t0 := Time.get_ticks_msec()
-	while not FileAccess.file_exists(ready) and Time.get_ticks_msec() - t0 < 90000 and OS.is_process_running(pid):
+	while not FileAccess.file_exists(ready) and Time.get_ticks_msec() - t0 < CHILD_START_MS and OS.is_process_running(pid):
 		await tree.process_frame
-	ok(FileAccess.file_exists(ready), "the child made the edit")
+	if not ok(FileAccess.file_exists(ready), "the child made the edit (%d s)" % ((Time.get_ticks_msec() - t0) / 1000)):
+		if OS.is_process_running(pid):
+			OS.kill(pid)
+		return
+	ok(OS.is_process_running(pid), "the child still runs (its lifetime is far past the wait)")
 	eq(OS.kill(pid), OK, "kill the child by its PID")
 	t0 = Time.get_ticks_msec()
 	while OS.is_process_running(pid) and Time.get_ticks_msec() - t0 < 10000:

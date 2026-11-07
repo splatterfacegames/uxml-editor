@@ -83,6 +83,25 @@ static func choices(session: EdDocumentSession, node: EdUxmlNode, property: Stri
 	return out
 
 
+## The write targets of a `transition-*` edit during a timeline run to
+## `states`: the targets of the states, then the targets without states
+## (inline, the rules without states that apply, their new rules), the
+## winner first. A transition of a run often comes from a rule without
+## states: `.a { transition: ... }` also gives the change to `.a:hover`.
+static func run_choices(session: EdDocumentSession, node: EdUxmlNode, property: String, entries: Array, states: Array) -> Array:
+	var all := choices(session, node, property, entries, states)
+	if not states.is_empty():
+		var seen := {}
+		for c in all:
+			seen[c["id"]] = true
+		for c in choices(session, node, property, entries, []):
+			if not seen.has(c["id"]):
+				all.append(c)
+	var out: Array = all.filter(func(c): return c["winner"])
+	out.append_array(all.filter(func(c): return not c["winner"]))
+	return out
+
+
 ## The selectors of a new rule for `node`: `#name` when the name is a
 ## unique identifier, then `.class` for each class; with the states.
 static func selectors_for(session: EdDocumentSession, node: EdUxmlNode, states: Array) -> Array:
