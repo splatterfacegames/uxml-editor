@@ -25,6 +25,11 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                source_view.gd     CodeEdit, LF display copy          │
 │                inspector_view.gd  provenance inspector: states,      │
 │                                   classes, typed fields, targets     │
+│                timeline_view.gd   timeline panel: tracks, playback,  │
+│                                   scrub, bar edits                   │
+│                easing_curve.gd    curve of a USS timing function     │
+│                easing_picker.gd   picker of the easing keywords      │
+│                settings.gd        per-user settings (EdSettings)     │
 │                tab_bar.gd         document tabs (godot-uxml)         │
 │                diagnostics.gd     diagnostics entries and filters    │
 │                ui_util.gd         label and model updates without a  │
@@ -37,6 +42,8 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                                   updates, element map, hit-test,    │
 │                                   provenance, forced states          │
 │                buffer_resolver.gd unsaved buffers override disk      │
+│                transition_player  one state change on the canvas     │
+│                                   (R7: get_transitions, seek)        │
 ├───────────────────────────────────────────────────────────────────────┤
 │ src/core/      Source-backed editing (no Godot UI, headless-tested)  │
 │                uxml_source.gd     UXML -> span tree (EdUxmlNode)     │
@@ -53,6 +60,10 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                                   with groups and new-element attrs  │
 │                style_types.gd     USS value kinds, checks, helpers   │
 │                style_targets.gd   write targets (ADR 0004)           │
+│                transition_values  the transition-* lists: entries,   │
+│                                   time text, declared transitions    │
+│                timeline_model.gd  tracks, playhead, scale, From and  │
+│                                   To states                          │
 │                provenance.gd      declaration rows, class rules,     │
 │                                   class edits                        │
 │                uss_commands.gd    rule and inline declaration edits  │
@@ -152,6 +163,7 @@ Lookups:
 | `hit_test()` | `element_at(point)` (R8): transforms and clipping apply, `picking-mode` does not (the editor selects what the author wrote) |
 | `explain()` | `explain_style` (R5), origins normalized to workspace paths |
 | `set_forced()` | `set_forced_states` (R6); the host keeps the states by node id and sets them again after a full load |
+| `EdTransitionPlayer` | `transitions_manual`, `get_transitions`, `seek_transitions`, `advance_transitions`, `set_forced_states` (R6, R7) |
 
 The theme menu selects Unity's choice (auto), the runtime theme, or the
 editor dark or light skin.
@@ -170,6 +182,7 @@ a USS file). Every view makes transactions and passes them to
 | Library | insert at the selection; drag to insert at a drop position |
 | Edit menu and shortcuts | cut, copy, paste, duplicate, delete, wrap, unwrap, move up and down |
 | Inspector | attributes, inline style declarations, the element type (rename) |
+| Timeline | `transition-delay`, `transition-duration` and `transition-timing-function`, through the write targets of the inspector |
 | Source | any text; typing coalesces into one step per pause run |
 
 A transaction records the selection before it and may name the selection
@@ -252,7 +265,21 @@ workspace.
   element, so the opposite edge stays. Values are whole pixels. A value
   that is not in px (`auto`, a percentage) is refused for a move; a resize
   measures the rendered border box.
-- **Write targets of a gesture** (ADR 0004, port of `layoutStyleWritePlanner.ts`). The
+- **Target question of a drag.** A drag asks
+  `EdInspectorView.gesture_target()` once per property: the remembered
+  choice, the only valid target, or (more than one target, no choice) the
+  default target and a question at the end of the drag. The default is the
+  winner, else the inline style, else the first target. Every step of the
+  drag writes to that target, so the canvas shows the real render. At the
+  end, the write-target menu opens. The same target needs no second edit.
+  Another target undoes the steps and gets one write of the end values.
+  Cancel undoes the drag. The choice goes into the same memory as the
+  choices of the inspector fields, until the selection or the state preview
+  changes. A nudge uses a remembered choice and else the winner, without
+  a question. A new rule is inserted once: the later steps write to the
+  rule.
+- **Write targets of a gesture without a chosen target** (ADR 0004, port
+  of `layoutStyleWritePlanner.ts`). The
   godot-uxml computed style names the declaration that wins.
   `EdRenderHost.style_facts()` normalizes the origin: a rule of a project
   stylesheet, a theme rule, inline, inherited or default. A property is
@@ -331,6 +358,75 @@ declarations of the focused style property and the layout readout.
   default of the godot-uxml catalog as the placeholder; a menu next to the
   add row lists the catalog attributes of the element.
 
+## Transition timeline
+
+`EdTimelineView` is the panel under the canvas. Its header is godot-uxml
+(`tl-*` in the window document). The track area is an `IMGUIContainer` that
+the view draws (`set_imgui_handler`).
+
+- **A run** is one change of the selected element from a From state to a
+  To state. A state is `{classes, states}`, written as `.a.b:hover`
+  (`EdTimelineModel`). `EdTransitionPlayer.arm()` sets
+  `transitions_manual`, shows the From state, finishes every transition,
+  and shows the To state. godot-uxml then starts the transitions of the
+  change, and `get_transitions()` lists them. The tracks are those
+  entries.
+- **The classes of a run** go to the `class` attribute of the godot-uxml
+  model, with the classes that the control adds
+  (`UxmlParts.merged_class`). The states go to `set_forced_states`. A run
+  never changes the source text. `disarm()` shows the classes of the
+  source and the states of the state preview again, and gives the frame
+  clock back. A selection change, another document, preview and a canvas
+  gesture end the run. A render during a run arms the run again at the same
+  time, so an edit or an undo shows at once.
+- **Live playback.** `EdInspectorView.states_toggled` and `classes_toggled`
+  start a run and play it. A class edit waits for its render.
+- **Time.** `EdTimelineModel.step()` moves the playhead per frame (speed,
+  loop). Each move calls `seek_transitions()`. A seek also goes back and
+  past the end: godot-uxml keeps a transition until playback passes its
+  end, and the player never plays. At the end of a run the inspector shows
+  its computed values again.
+- **Without a run** the tracks are the declared transitions of the computed
+  style (`EdTransitionValues.declared`), dimmed. In document scope that is
+  every element, also without a selection.
+- **Edits.** A bar drag writes one entry of `transition-delay` or
+  `transition-duration`, a double-click one entry of
+  `transition-timing-function` (`EdTransitionValues.with_entry`: the list
+  grows to the length of `transition-property`, and equal entries collapse).
+  The writes go through `EdInspectorView.gesture_target()` and
+  `commit_choice()`: at most one write per frame, one coalesce key per
+  drag, and the same target question as a canvas drag. During a run the
+  targets come from `EdStyleTargets.run_choices()`: the targets of the To
+  state, then the targets without states, the winner first. The transition
+  of a change often comes from a rule without states
+  (`.a { transition: ... }` also gives the change to `.a:hover`).
+- **Easing.** `EdEasingCurve` draws a keyword with `UssTransitions.easing`,
+  the function of the transitions, so the curve is the motion of the canvas.
+  `EdEasingPicker` lists `UssProperties.EASING_MODES`.
+
+## Panel layout
+
+- **Pane sizes.** `EdMain.SPLITS` lists the seven `TwoPaneSplitView`
+  elements. The sizes go to `EdSettings` (a `ConfigFile`, default
+  `user://settings.cfg`) at each release of the left mouse button and at
+  close. Only a changed value writes the file. `_restore_splits()` applies
+  the sizes before the first layout, as numbers between 40 and 4000 px. The
+  timeline options (loop, speed, scope) use the same file. The test runner
+  and the benchmark use a file of their own.
+- **Long texts.** A `Label` or `Button` with `overflow: hidden` and
+  `text-overflow: ellipsis` ends in `...`, and its tooltip has the whole
+  text. godot-uxml elides after each layout. `EdUi.set_label()` changes a
+  text without a layout, so it elides at once with the same function and
+  the same metadata. A `LineEdit` placeholder does not elide in Godot:
+  `EdUi.elided_placeholder()` shortens it at the width of the field, and
+  the inspector does this again when the fields change width (request R18).
+  The value-origin labels are such placeholders. The row labels of the
+  inspector have a relative width (45%, at most 150 px), so a narrow pane
+  keeps room for the fields. Rows of the lists and trees elide through the
+  USS of `.panel-list`.
+- **Classes section.** One block per class, displayed only when in use. A
+  change of the number of classes costs one layout of the inspector.
+
 ## Editor window
 
 The window is `src/app/ui/editor_shell.uxml`, rendered by godot-uxml with
@@ -344,18 +440,18 @@ search is a `uie:ToolbarSearchField`. The diagnostics filters are
 
 The inspector is a second godot-uxml document. The editor generates its
 UXML once (a skeleton with fixed rows for the common attributes and style
-properties, pairs of extra rows, class rows and declaration rows) and
+properties, pairs of extra rows, one block per class and declaration rows) and
 then changes it in place for each selection: field values and
 placeholders go to the `LineEdit` controls, row names and declaration
 texts go to fixed-size `Label` and `Button` controls, unused rows of a
 shown block are `visibility: hidden`, and an extra block of attributes
 or style declarations that is not in use is not displayed (so the
 Attributes section has no gap; a change of the number of extra blocks
-costs one layout). The first class block and the declaration rows stay
-displayed: most selections change their content, and a display change
-lays out the whole inspector (about 90 ms on the GDScript path). A selection change
-then needs few restyles and seldom a layout (requests R15, R17 have the
-costs). The document tabs are a third,
+costs one layout). The class blocks are displayed only when in use, so a
+change of the number of classes also costs one layout of the inspector
+(about 12 ms native, about 90 ms GDScript). The declaration rows stay
+displayed. A selection with the same number of classes needs few restyles
+and no layout (requests R15, R17 have the costs). The document tabs are a third,
 small godot-uxml document (`EdTabBar`), generated when the tabs change.
 The hierarchy context menu is a godot-uxml `UxmlPopupMenu`.
 
@@ -372,6 +468,9 @@ one is mounted into a `*-host` element of the window document:
 | `EdDragController` (a `Control` over the window) | drag and drop | draws the drag title at the pointer and the drop line of a before/after drop over a leaf row; godot-uxml runs the drag and draws its own indicator for the other drops (request R12); it ignores the mouse |
 | `ColorPicker` in a `PopupPanel` | inspector colour helper | the picker of godot-uxml `ColorField` (`UxmlEditorWidgets.open_color_picker`), opened for the chosen write target |
 | `Button.self_modulate` | inspector colour swatch | the computed colour without a restyle per selection (request R17) |
+| `IMGUIContainer` draw callback | timeline tracks, easing curves | bars, curves and the playhead are drawings; the element stays in the UXML document, and godot-uxml has no vector shape element for a curve |
+| `Popup` | easing picker | the window of the picker, as `UxmlPopupMenu` has one; the content is a godot-uxml document |
+| `LineEdit.placeholder_text` | value-origin labels of the inspector | set directly and shortened by the editor (requests R17, R18) |
 | `EdCanvasView._draw` | selection outlines, handles, snap guides, the drop hint, the preview badge | drawn over the SubViewport texture at the canvas zoom; not document content |
 
 ## Projects and saving
@@ -439,6 +538,8 @@ that keep a frame cheap:
 - The source view replaces only the changed text.
 - The hierarchy keeps a map from item id to row; the hit-test tries the
   deepest element first.
+- A seek restyles only the running transitions and redraws the track area
+  and the canvas overlay. The time label has a fixed width.
 
 ## Testing
 
@@ -451,7 +552,14 @@ godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
 The runner loads every script under `src/` first (a compile error fails
 the run), then runs each `test_*` method of `tests/unit/test_*.gd`. A
 script error inside a test fails the test. `--gdscript` disables the
-godot-uxml native core.
+godot-uxml native core. Each output line gives the time of one test file.
+
+The app tests run the real window, so the time of the suite follows the
+load of the machine: 2 to 6 minutes with some load, 18 minutes at full
+load. Tests wait for a state, not for a time. The crash recovery test waits
+up to 10 minutes for its child editor and ends the wait when the child is
+ready; the child ends itself only after 15 minutes, and the test kills it
+by its PID.
 
 - Core: patch sets, buffers, history, locators, both parsers, the UXML and
   USS commands (ported from the TypeScript suites), project store.
@@ -477,6 +585,15 @@ godot-uxml native core.
 - Workspace (`test_app_workspace.gd`): diagnostics filters and the jump to
   a range, tabs with one history, the disk watch timer (reload and the
   conflict question), the hierarchy context menu.
+- Timeline (`test_timeline_core.gd`, `test_app_timeline.gd`): the
+  `transition-*` lists, the playhead, the From and To states; live playback
+  of state and class changes, the eased value at a time, scrub by mouse,
+  play, pause, loop and speed; bar drags as one undo step with exact bytes;
+  the target question and its memory; the targets of a run; the easing
+  picker; the end of a run.
+- Panels (`test_app_panels.gd`): pane sizes per user, a real drag of a split
+  line, long texts that elide with a tooltip, the height of the Classes
+  section, the target question of canvas drags.
 - Editing in the app (`tests/unit/test_app_editing.gd`): the input goes
   through the window (`Viewport.push_input`): library insert and search,
   drag from the library to the hierarchy and the canvas, hierarchy

@@ -18,7 +18,7 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R4 | P2 | done in `6137987` | Partial reload of one stylesheet or one document |
 | R5 | P2 | done in `6137987` | All cascade candidates of a property |
 | R6 | P2 | done in `6137987` | Forced pseudo-states on an element |
-| R7 | P2 | done in `6137987` (not used yet: M6) | Transition snapshot and seek |
+| R7 | P2 | done in `6137987` | Transition snapshot and seek |
 | R8 | P2 | done in `6137987` | Hit-test that respects transforms and clipping |
 | R9 | P2 | done in `6137987` | Catalog of supported elements and attributes |
 | R10 | P3 | done in `6137987` | Template instance of a cloned element |
@@ -29,6 +29,10 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R15 | P2 | open (workaround: in-place updates) | Build cost of a document; text updates without a layout |
 | R16 | P3 | open (workaround) | Context menu at a point, in the look of the owner document |
 | R17 | P3 | open (workaround) | Value updates of field controls without a restyle |
+| R18 | P3 | open (workaround) | Elide the placeholder of a text field |
+| R19 | P3 | open (workaround) | Runtime classes of an element; finish all transitions |
+| R20 | P3 | open (workaround) | Public easing, shorthand and elision helpers |
+| R21 | P3 | open (workaround) | A signal when a split view changes size |
 
 The editor pins godot-uxml `6137987` (github.com/splatterfacegames/godot-uxml),
 which has R1-R14. The sections of the done requests give the final API
@@ -142,7 +146,7 @@ States: hover, active, focus, checked, selected, disabled, enabled.
 (`EdRenderHost.set_forced()`). The host keeps the states by editor node
 id and sets them again after a full load.
 
-## R7. Transition snapshot and seek (P2, done; not used yet)
+## R7. Transition snapshot and seek (P2, done)
 
 ```gdscript
 # UxmlDocument (with transitions_manual = true)
@@ -151,7 +155,10 @@ func seek_transitions(seconds: float) -> void
 func get_transition_clock() -> float
 ```
 
-**Editor use.** None yet; the transition timeline is milestone 6.
+**Editor use.** `EdTransitionPlayer` runs one state change for the
+timeline (milestone 6). `get_transitions()` gives the tracks;
+`seek_transitions()` runs at each scrub and playback frame. On the menu
+fixture a scrub frame costs about 3.4 ms on the native path.
 
 ## R8. Hit-test (P2, done)
 
@@ -323,3 +330,65 @@ colour swatch is a tinted button.
 **Workaround.** Text values go to the `LineEdit` controls (`EdUi`);
 Toggle values (the state preview) go through the model; the colour
 swatch is the `self_modulate` of a Button control.
+
+## R18. Elide the placeholder of a text field (P3)
+
+`text-overflow: ellipsis` elides a Label or a Button. The placeholder of a
+TextField is cut off at the edge of the `LineEdit`.
+
+Request: elide the placeholder of a field with `text-overflow: ellipsis`,
+and show the whole text as the tooltip.
+
+**Use case.** The inspector shows the computed value and its origin as the
+placeholder: `180px   ← Menu.uss`.
+
+**Workaround.** `EdUi.elided_placeholder()` shortens the text with
+`UxmlStyleApplier.elide_text`. The inspector does this at each value change
+and when the fields change width.
+
+## R19. Runtime classes of an element; finish all transitions (P3)
+
+```gdscript
+# UxmlDocument
+## The author classes of `element` at runtime; the classes that the control
+## adds stay.
+func set_author_classes(element: UxmlElement, classes: PackedStringArray) -> void
+## End every running transition at its end value, now.
+func finish_transitions() -> void
+```
+
+**Use case.** A timeline run shows a From state and a To state of an
+element, with no source edit, and needs a start state without transitions.
+
+**Workaround.** `EdTransitionPlayer._apply` sets the `class` attribute of
+the model to `UxmlParts.merged_class(el, author)`. `_settle` calls
+`advance_transitions(1.0e5)`, which also emits end events and moves the
+clock.
+
+## R20. Public easing, shorthand and elision helpers (P3)
+
+The editor calls these static members of godot-uxml. The design document
+does not list them as API, so a change in godot-uxml can break the editor:
+
+| Member | Editor use |
+| --- | --- |
+| `UssTransitions.easing(mode, t)` | `EdEasingCurve` |
+| `UssProperties.EASING_MODES` | the easing picker |
+| `UssTransitions.SHORTHANDS` | the entry of a track in a `transition-property` list |
+| `UxmlStyleApplier.elide_text()` | `EdUi` (R15, R18) |
+| `UxmlParts.merged_class()` | `EdTransitionPlayer` (R19) |
+
+Request: document these members as API, or give public equivalents.
+
+## R21. A signal when a split view changes size (P3)
+
+```gdscript
+# UxmlDocument
+signal split_changed(view_name: String, dimension: float)  # at the end of a drag
+```
+
+**Use case.** The editor keeps the pane sizes per user.
+
+**Workaround.** `EdMain.save_splits()` reads `get_split_dimension()` of the
+seven views after each release of the left mouse button, and at close.
+

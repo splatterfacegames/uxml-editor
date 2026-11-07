@@ -6,9 +6,9 @@ render, pan, zoom, selection and hit-test, the hierarchy, the source view
 in sync, one undo history, inspector v1 (attributes and inline styles),
 revision-checked saves.
 
-Milestones 2, 3, 4 and 5 (done on the `godot` branch): see the sections
-below. Screenshots: `docs/screenshots/m2-*.png`, `m3-*.png`, `m4-*.png`
-and `m5-*.png`. Milestone 5 came before milestone 4, after a frame-cost
+Milestones 2, 3, 4, 5 and 6 (done on the `godot` branch): see the sections
+below. Screenshots: `docs/screenshots/m2-*.png`, `m3-*.png`, `m4-*.png`,
+`m5-*.png` and `m6-*.png`. Milestone 5 came before milestone 4, after a frame-cost
 pass (see "Frame cost" below). Before milestone 4 the pin moved to
 godot-uxml `6137987` (requests R1-R14), and the editor replaced every
 workaround with the godot-uxml editor APIs (see "Re-pin" below).
@@ -59,9 +59,8 @@ off; hit-test through Control transforms (the R8 workaround); preview
 mode that sends the mouse and the keyboard to the document.
 
 Not done: alignment and distribution of several elements (the TypeScript
-`align` and `distribute`); the rotated outline of a transformed element
-(the overlay draws the unrotated rectangle); a write-target picker for a
-canvas gesture (M4 adds the picker to the inspector).
+`align` and `distribute`). Done later: the rotated outline of a transformed
+element (the re-pin) and a write-target picker for a canvas gesture (M6).
 
 The proposal was:
 
@@ -136,9 +135,9 @@ Done:
   rows.
 
 Not done: a USS rule view of a whole sheet (the source view shows the
-sheet); a write-target picker for canvas gestures (they write to the
-winner, as in M3); per-row typed controls that show the current value
-(request R17); `transition-*` easing curve previews (M6).
+sheet); per-row typed controls that show the current value (request R17).
+M6 added the write-target picker for canvas gestures and the easing curve
+previews.
 
 The proposal was:
 
@@ -207,15 +206,54 @@ The proposal was:
   per-file reload/keep/compare dialog.
 - **Multi-document tabs**; the one history stays global.
 
-## M6. Pseudo-states and the transition timeline
+## M6. Pseudo-states and the transition timeline (done)
 
-- **State preview**: done in M4 (forced states, R6). Left for M6: play
-  the transitions of each toggle on the timeline.
-- **Transition timeline** (old issues #6-#11, #18): run the document with
-  `transitions_manual = true`; show one track per running transition
-  (element, property, delay, duration, easing); play, pause, step and
-  scrub. Needs request R7 for seek and the snapshot.
-- Inspector support for `transition-*` with an easing curve preview.
+Done:
+
+- **Live playback**: a toggle of the state preview and a class edit play
+  the transitions of the change on the canvas (R6, R7).
+- **Timeline panel**: one track per transitioning property of the selection
+  or the document; bars for the delay, the duration and the easing; play,
+  pause, loop, speed and scrub through `seek_transitions`; a From and a To
+  state (for example normal to `:hover`, or class `a` to class `b`).
+- **Edits from the timeline**: a bar drag changes the delay or the
+  duration, a double-click the easing, through the write targets of the
+  inspector, as one undo step per gesture.
+- **Easing**: the curve in the inspector and a picker of the Unity keywords.
+- **Panel layout**: pane sizes per user, a wider inspector, long texts that
+  elide with a tooltip, a Classes section of the height of its content, and
+  the write-target picker for canvas drags.
+
+Not done: a step button (scrub does this); a run of more than one selected
+element; a change of the timing function by a drag of curve handles (USS
+has keywords only). The inspector shows the computed values of a run at the
+last render, and again at the end of the run, not at each frame.
+
+### M6 frame cost
+
+`bench/frame_cost.gd`, in ms per frame: median, with the maximum in
+parentheses. Median of 3 runs per path (large, GDScript: 1 run). Other
+agents loaded the machine during the runs (about 70% CPU).
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| timeline: scrub (one seek per frame) | 3.05 (4.04) | 4.11 (5.79) | 2.28 (3.67) | 3.97 (5.52) |
+| timeline: play with loop | 2.26 (3.29) | 3.92 (5.84) | 1.75 (2.93) | 3.29 (4.08) |
+| timeline: idle, armed | 0.12 (0.27) | 0.08 (0.19) | 0.08 (0.18) | 0.12 (1.26) |
+| timeline: frame of a bar edit (p95) | 23.8 | 35.3 | 356 | 1509 |
+| selection | 20.0 (203) | 98.4 (662) | 32.2 (284) | 131 (649) |
+| drag (move) | 12.9 (40.5) | 16.1 (128) | 33.3 (289) | 43.7 (696) |
+
+The worst scrub frame of all runs on the menu fixture, native, is 4.11 ms
+(the limit is 16 ms). A bar edit on the large document reloads the
+stylesheet (requests R4, R15), and the edit also starts the run again.
+
+Selection costs more than in milestone 4 (9.3 ms native, 15.5 ms GDScript;
+base commit `cd7fc1c` in this load: 9.85 ms native). The Classes section now
+has the height of its content, so a change of the number of classes lays
+out the inspector. The scenario `selection, same number of classes` needs no
+such layout: 13 ms native, 22 ms GDScript, against 23 ms and 132 ms for
+the mixed scenario in the same runs. The two runs show request R15, item 4.
 
 ## M7. State-machine panel
 
@@ -223,8 +261,8 @@ The proposal was:
   pressed, focused, checked, disabled) as nodes, and the USS rules that
   style each state as edges. Selecting a node forces the state (R6) and
   opens the rules in the provenance inspector. Selecting an edge plays the
-  transition between the two states on the timeline (M6).
-  Request R7 (`get_transitions`, `seek_transitions`) is in the pin.
+  transition between the two states on the timeline
+  (`EdTimelineView.run`).
 
 ## M8. Packaging and the web export
 

@@ -40,11 +40,14 @@ message. Such an edit changes no file and adds no undo step.
   Each drag and each run of arrow keys is one undo step. An absolute
   element gets `left` and `top`; a relative element gets `margin-left` and
   `margin-top`. A resize writes `width` and `height`.
-- **Write targets of a drag.** A layout value goes to the declaration that sets the
-  current value: the USS rule or the inline style. A value from the theme
-  or from no declaration goes into the inline style
-  (`docs/adr/0004-style-write-targets.md`). A value from a pseudo-state
-  rule (for example `:hover`) stops the edit with a message.
+- **Write targets of a drag.** During a drag, a layout value goes to the
+  declaration that sets the current value: the USS rule or the inline
+  style. A value from the theme or from no declaration goes into the
+  inline style (`docs/adr/0004-style-write-targets.md`). When more than one
+  target is valid, a menu asks for the target at the end of the drag. The
+  editor keeps the choice with the choices of the inspector. Another
+  target gets the end of the drag instead. The drag stays one undo step.
+  **Cancel** undoes the drag.
 - **Snapping.** Edges and centres snap to the siblings and the parent and
   show a guide. Other edges snap to the pixel grid. **Snap** turns
   snapping on and off; the grid menu sets the grid. Alt or Ctrl during a
@@ -111,6 +114,29 @@ message. Such an edit changes no file and adds no undo step.
   `:active`, `:focus`, `:checked`, `:selected` and `:disabled` on the
   selected element. The canvas shows the state. The declarations and the
   write targets then show the rules of the state.
+- **Transitions on the canvas.** A state toggle of the state preview or
+  a class edit in the **Classes** section plays the `transition-*` values
+  of the change on the canvas.
+- **Timeline.** The panel under the canvas has one track for each
+  transitioning property of the selection, or of the whole document
+  (**Selection** or **Document**). Each bar shows the delay, the duration
+  and the easing. **▶** plays and pauses, **|◀** goes back to the start,
+  **Loop** plays again, and the menu sets the speed. A drag on the ruler
+  scrubs the canvas. **From** and **To** set the states of the run: type
+  a state such as `.a.b:hover`, or use the menu. A run changes no source
+  text.
+- **Edits on the timeline.** A drag of a bar changes `transition-delay`.
+  A drag of the right end of a bar changes `transition-duration`. A
+  double-click on a bar opens the easing picker. The edit uses the write
+  targets of the inspector and is one undo step. Alt or Ctrl during a drag
+  turns off the snap to 0.05 s. Escape cancels the drag.
+- **Easing.** The inspector shows the curve of
+  `transition-timing-function`. A click on the curve or on the **∿** button
+  opens a picker with the curve of every Unity easing keyword.
+- **Panel layout.** Drag a split line to change the size of a pane. The
+  editor keeps the sizes for the user (`user://settings.cfg`, or
+  `--settings=<file>`). A long text ends in `...`, and its tooltip shows
+  the whole text.
 - **Undo.** One history records the edits of all views and all tabs.
   An undo of an edit in another document shows the tab of that document
   (`docs/adr/0008-tabs-and-history.md`).
@@ -133,8 +159,8 @@ message. Such an edit changes no file and adds no undo step.
   Select a diagnostic to select its range in the source view and its
   element in the canvas and the hierarchy.
 
-`docs/roadmap.md` lists the next milestones: the transition timeline,
-the state-machine panel and the web export.
+`docs/roadmap.md` lists the next milestones: the state-machine panel and
+the web export.
 
 ## Screenshots
 
@@ -155,6 +181,11 @@ the state-machine panel and the web export.
 | `docs/screenshots/m5-recovery.png` | The recovery question after a session that ended with unsaved edits. |
 | `docs/screenshots/m5-conflict.png` | The question for a file that changed on disk and in the editor. |
 | `docs/screenshots/m5-context-menu.png` | The hierarchy context menu. |
+| `docs/screenshots/m6-timeline.png` | A `:hover` toggle paused at 0.6 s: three tracks with delay, duration and easing, and the easing curve in the inspector. |
+| `docs/screenshots/m6-timeline-classes.png` | A run from `.menu-button` to `.menu-button.alt`, document scope. |
+| `docs/screenshots/m6-easing-picker.png` | The easing picker with the curve of every Unity keyword. |
+| `docs/screenshots/m6-canvas-target-picker.png` | The write-target menu at the end of a canvas drag. |
+| `docs/screenshots/m6-narrow-inspector.png` | A narrow inspector: long class rules and value origins end in `...`. |
 
 ## Requirements
 
@@ -193,10 +224,11 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
 | `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
 | `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
-| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states` or `classes`. |
+| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states`, `classes`, `timeline`, `timeline-classes`, `easing`, `canvas-picker` or `narrow`. |
 | `--gdscript` | Use the GDScript path of godot-uxml (no native core). |
 | `--recovery-dir=<dir>` | Keep the recovery journals in this directory (default `user://recovery`). |
 | `--watch-interval=<seconds>` | Set the time between disk checks (default 2; 0 turns the timer off). |
+| `--settings=<file>` | Keep the pane sizes and the timeline options in this file (default `user://settings.cfg`). |
 | `--ready-file=<path>` | Write this file after the options ran (tests). |
 | `--exit-after=<seconds>` | Stop the editor after this time (tests). |
 
@@ -225,6 +257,9 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | Ctrl+W | Close the active tab. |
 | Ctrl+Tab, Ctrl+Shift+Tab | Show the next or the previous tab. |
 | Right-click (hierarchy) | Open the Edit commands for the selection. |
+| Space, Home (timeline, after a click on the tracks) | Play or pause; go back to the start. |
+| Alt or Ctrl with a bar drag (timeline) | Turn off the snap to 0.05 s. |
+| Escape (timeline, during a bar drag) | Cancel the drag. |
 
 The structure shortcuts work when no text field has the keyboard focus.
 
@@ -242,6 +277,10 @@ that text in the file or test name. The exit code is the number of failed
 tests. One recovery test starts an editor in a child process and stops
 the process by its process ID.
 
+The full suite took 2 to 6 minutes on a machine with some load, and 18
+minutes on a machine at full load. Do not give the command a time limit of
+less than 1 hour. Each line of the output gives the time of one test file.
+
 ## Measure the frame cost
 
 ```
@@ -251,7 +290,9 @@ godot --headless --path . -s res://bench/frame_cost.gd -- --fixture=large
 ```
 
 The benchmark runs the editor and measures each frame for idle, hover,
-selection, typing, the commit of typing and a canvas drag. The table
+selection, typing, the commit of typing, a canvas drag, and the timeline:
+idle with a run, scrub, play, and a bar drag. Add `--only-timeline` to
+measure only the timeline. The table
 gives the median, the 95th percentile and the maximum in milliseconds,
 and the number of full renders, render patches and inspector builds of
 each scenario. `--fixture=large` uses a generated document of about 500

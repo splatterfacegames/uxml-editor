@@ -21,6 +21,40 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Added (Godot rebuild, milestone 6 and panel layout)
+
+- Transitions play on the canvas: a state toggle of the state preview or
+  a class edit starts the `transition-*` values of the change (godot-uxml
+  `get_transitions`, `seek_transitions`).
+- Timeline panel: one track per transitioning property of the selection or
+  of the document, with bars for the delay, the duration and the easing;
+  play, pause, loop, speed and scrub; a From and a To state (classes and
+  pseudo-states). A run changes no source text.
+- Timeline edits: a drag of a bar changes the delay, a drag of its right
+  end the duration, a double-click opens the easing picker. Each gesture is
+  one undo step through the write targets of the inspector.
+- Easing curve of `transition-timing-function` in the inspector, and a
+  picker with the curve of every Unity easing keyword.
+- The write-target picker for canvas drags, at the end of the drag, with
+  the same memory as the inspector.
+- Pane sizes are kept per user (`EdSettings`, `--settings=<file>`). The
+  default inspector is wider: 440 px.
+- Long texts end in `...` with the whole text as the tooltip: declaration
+  lines, class rules, value origins, list rows, window labels. The Classes
+  section has the height of its content.
+- `bench/frame_cost.gd`: timeline scenarios and `--only-timeline`.
+
+### Fixed (Godot rebuild, milestone 6)
+
+- A write-target choice no longer ends with a write to the `style` or
+  `class` attribute of the element. The memory key held the attribute
+  values.
+- `--watch-interval=0` printed a timer error.
+- The test runner printed an error for a recovery directory that does not
+  exist, and prints the time of each test file.
+- The crash recovery test tolerates a slow start of its child editor on a
+  busy machine.
+
 ### Added (Godot rebuild, milestone 4)
 
 - Provenance inspector: the declarations of the focused style property

@@ -28,6 +28,16 @@ chosen target is frozen against the selection it was computed for, and a
 commit arriving after the session or selection moved on is refused rather
 than redirected.
 
+The Godot editor extends this decision to gestures. A canvas drag or a
+timeline bar drag writes to the remembered choice or the only valid target.
+When more than one target is valid and none is remembered, the gesture
+writes to the winner (else the inline style, else the first target), so the
+canvas shows the real render, and the picker asks at the end of the gesture.
+Another target gets the end value in place of the writes of the gesture, as
+one undo step. Cancel undoes the gesture. A timeline edit during a run also
+offers the targets without states: the rule that gives the running
+transition can have no pseudo-state.
+
 ## Evidence
 
 - `src/core/documents/StyleTarget.ts` derives the valid target set from the
