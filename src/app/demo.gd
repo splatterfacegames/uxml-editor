@@ -35,28 +35,20 @@ static func stage(m: EdMain, demo: String) -> void:
 					m.shell.set_selection("palette-tree", [i])
 		"drag-canvas":
 			await _frames(tree, 2)
-			var e := EdElementCatalog.find("Toggle")
-			m.drag.begin({"kind": "palette", "entry": e, "label": "+ Toggle"})
 			var title := _node(m, "menu-title")
 			var r := m.canvas.host.rect_of(title.id)
 			var root_r := m.canvas.host.rect_of(_node(m, "menu-root").id)
-			m.drag._update_target(m.canvas.screen_to_global(Vector2(root_r.position.x + 300, r.end.y + 4)))
+			var from := await _row_center(m, "palette-tree", _palette_index(m, "Toggle"))
+			await _drag_to(m, from, m.canvas.screen_to_global(Vector2(root_r.position.x + 300, r.end.y + 4)))
 		"drag-hierarchy":
 			await _frames(tree, 2)
 			var quit := _node(m, "quit-button")
 			_select(m, "quit-button")
 			await _frames(tree, 2)
 			var play := _node(m, "play-button")
-			m.drag.begin({"kind": "nodes", "locs": [EdLocator.create(quit)], "label": "Move Button"})
-			var idx := -1
-			for i in 50:
-				var it := m.shell.get_tree_item("hierarchy-tree", i)
-				if not it.is_empty() and int(it["id"]) == play.id:
-					idx = i
-			for row in m.shell.get_list_rows("hierarchy-tree"):
-				if row.index == idx:
-					var rr: Rect2 = row.get_element().get_global_rect()
-					m.drag._update_target(Vector2(rr.get_center().x, rr.position.y + 3))
+			var from := await _row_center(m, "hierarchy-tree", _tree_index(m, quit.id))
+			var to_r := m.shell.get_item_rect("hierarchy-tree", _tree_index(m, play.id))
+			await _drag_to(m, from, Vector2(to_r.get_center().x, to_r.position.y + 2))
 		"resize":
 			_select(m, "play-button")
 			await _frames(tree, 3)
@@ -128,10 +120,7 @@ static func stage(m: EdMain, demo: String) -> void:
 		"context-menu":
 			await _frames(tree, 3)
 			var quit := _node(m, "quit-button")
-			for row in m.shell.get_list_rows("hierarchy-tree"):
-				var it := m.shell.get_tree_item("hierarchy-tree", row.index)
-				if not it.is_empty() and int(it["id"]) == quit.id:
-					m.open_context_menu(row.get_element().get_global_rect().get_center())
+			m.open_context_menu(await _row_center(m, "hierarchy-tree", _tree_index(m, quit.id)))
 	await _frames(tree, 6)
 
 
@@ -164,6 +153,50 @@ static func _copy(from: String, to: String) -> void:
 		DirAccess.copy_absolute(from + "/" + f, to + "/" + f)
 	for d in DirAccess.get_directories_at(from):
 		_copy(from + "/" + d, to + "/" + d)
+
+
+## Press at `from` and move to `to` with the button held (no release):
+## the drag of godot-uxml (request R12) stays open for the screenshot.
+static func _drag_to(m: EdMain, from: Vector2, to: Vector2) -> void:
+	var tree := m.get_tree()
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = true
+	e.position = from
+	e.global_position = from
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT
+	m.get_viewport().push_input(e)
+	await _frames(tree, 1)
+	for i in range(1, 7):
+		var mm := InputEventMouseMotion.new()
+		mm.position = from.lerp(to, i / 6.0)
+		mm.global_position = mm.position
+		mm.button_mask = MOUSE_BUTTON_MASK_LEFT
+		m.get_viewport().push_input(mm)
+		await _frames(tree, 1)
+
+
+static func _palette_index(m: EdMain, element: String) -> int:
+	for i in m.palette.element_indices():
+		if m.palette.entry_at(i)["name"] == element:
+			return i
+	return -1
+
+
+static func _tree_index(m: EdMain, id: int) -> int:
+	for i in 200:
+		var it := m.shell.get_tree_item("hierarchy-tree", i)
+		if it.is_empty():
+			return -1
+		if int(it["id"]) == id:
+			return i
+	return -1
+
+
+static func _row_center(m: EdMain, list: String, index: int) -> Vector2:
+	m.shell.scroll_to_item(list, index)
+	await _frames(m.get_tree(), 2)
+	return m.shell.get_item_rect(list, index).get_center()
 
 
 static func _frames(tree: SceneTree, n: int) -> void:

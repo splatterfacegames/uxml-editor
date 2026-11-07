@@ -4,9 +4,10 @@ extends UxmlResourceResolver
 ## editor's source buffers when the editor has them open, so the canvas
 ## shows unsaved text. Every other file comes from disk as usual.
 ##
-## Workaround: godot-uxml has no public way to pass a resolver or text
-## overrides to UxmlDocument.load_source() (docs/godot-uxml-requests.md,
-## request R1).
+## EdRenderHost passes it to UxmlDocument.load_source() (request R1); the
+## document keeps it for reload(), replace_source() and
+## reload_stylesheet(), so the host updates the overrides before each
+## partial update.
 
 ## canonical absolute path (lower case on Windows) -> text
 var overrides: Dictionary = {}

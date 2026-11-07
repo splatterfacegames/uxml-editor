@@ -75,10 +75,7 @@ func tree_index(m: EdMain, list: String, id: int) -> int:
 func row_rect(m: EdMain, list: String, index: int) -> Rect2:
 	m.shell.scroll_to_item(list, index)
 	await frames(2)
-	for row in m.shell.get_list_rows(list):
-		if row.index == index:
-			return row.get_element().get_global_rect()
-	return Rect2()
+	return m.shell.get_item_rect(list, index)
 
 
 ## Send mouse events through the window, as a user would.

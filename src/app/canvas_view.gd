@@ -181,6 +181,7 @@ func _draw() -> void:
 		var v := screen_rect_to_view(r)
 		draw_rect(v, Color(ACCENT, 0.08), true)
 		draw_rect(v, ACCENT, false, 2.0 if k == 0 else 1.0)
+		_draw_transformed(id)
 		if k == 0:
 			for h in HANDLES:
 				var hr2 := _handle_rect(v, h)
@@ -201,6 +202,22 @@ func _draw() -> void:
 		var line: Array = drop_hint.get("line", [])
 		if line.size() == 2:
 			draw_line(pan + line[0] * zoom, pan + line[1] * zoom, DROP, 3.0)
+
+
+## The outline of a rotated, scaled or skewed element (its border box
+## through its transform, request R14) over the bounding box.
+func _draw_transformed(id: int) -> void:
+	var b := host.local_box_of(id)
+	if b.is_empty():
+		return
+	var t: Transform2D = b["transform"]
+	if t.x.is_equal_approx(Vector2.RIGHT) and t.y.is_equal_approx(Vector2.DOWN):
+		return
+	var sz: Vector2 = b["size"]
+	var pts := PackedVector2Array()
+	for c in [Vector2.ZERO, Vector2(sz.x, 0), sz, Vector2(0, sz.y), Vector2.ZERO]:
+		pts.append(pan + (t * c) * zoom)
+	draw_polyline(pts, Color(ACCENT, 0.9), 1.5)
 
 
 func _draw_badge(text: String) -> void:

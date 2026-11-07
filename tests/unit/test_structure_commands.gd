@@ -15,19 +15,43 @@ const DOC := "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\r\n" \
 # Catalog
 # ---------------------------------------------------------------------------
 
-func test_catalog_matches_the_tags_godot_uxml_knows() -> void:
-	var known: Dictionary = UssControls.IMPLICIT_CLASSES
+func test_catalog_comes_from_godot_uxml() -> void:
+	# R9: the library is UxmlControls.catalog() without UxmlObjects and the
+	# template container; the editor adds groups and new-element attributes.
+	var cat := UxmlControls.catalog()
+	var library := {}
 	for e in EdElementCatalog.entries():
-		ok(known.has(e["name"]), "godot-uxml knows palette element %s" % e["name"])
-	for tag in known:
-		ok(not EdElementCatalog.find(tag).is_empty() or EdElementCatalog.NOT_IN_PALETTE.has(tag),
-			"godot-uxml tag %s is in the palette or listed as not authored" % tag)
+		library[e["name"]] = e
+	for c in cat:
+		var shown: bool = not c["uxml_object"] and c["name"] != "TemplateContainer"
+		eq(library.has(c["name"]), shown, "catalog element %s in the library: %s" % [c["name"], shown])
+		ok(EdElementCatalog.is_known(c["name"]), "%s is known" % c["name"])
+		if shown:
+			eq(library[c["name"]]["container"], c["container"], "%s container flag from the catalog" % c["name"])
+			eq(library[c["name"]]["uri"], c["namespace"])
+	eq(library.size(), cat.filter(func(c): return not c["uxml_object"] and c["name"] != "TemplateContainer").size())
+	for tag in UssControls.IMPLICIT_CLASSES:
+		ok(EdElementCatalog.is_known(tag), "godot-uxml tag %s is known" % tag)
+	ok(not EdElementCatalog.is_known("MyCustomElement"))
 	eq(EdElementCatalog.find("ColorField")["uri"], EdElementCatalog.EDITOR)
 	eq(EdElementCatalog.find("Button")["uri"], EdElementCatalog.RUNTIME)
+	eq(Array(EdElementCatalog.attribute("ScrollView", "mode")["choices"]), ["Vertical", "Horizontal", "VerticalAndHorizontal"], "enum choices")
 	var groups := {}
 	for e in EdElementCatalog.entries():
 		groups[e["group"]] = true
 	eq(groups.keys().size(), EdElementCatalog.GROUPS.size(), "every group has elements")
+
+
+func test_catalog_source_is_a_seam() -> void:
+	EdElementCatalog.source = func(): return [
+		{"namespace": EdElementCatalog.RUNTIME, "name": "Button", "container": false, "editor_only": false, "uxml_object": false, "attributes": []},
+		{"namespace": EdElementCatalog.RUNTIME, "name": "Fancy", "container": true, "editor_only": false, "uxml_object": false, "attributes": []}]
+	EdElementCatalog.reset()
+	eq(EdElementCatalog.entries().map(func(e): return e["name"]), ["Fancy", "Button"], "an unlisted container goes to Containers")
+	eq(EdElementCatalog.find("Button")["attributes"], [["text", "Button"]], "new-element attributes stay the editor's")
+	EdElementCatalog.source = Callable()
+	EdElementCatalog.reset()
+	ok(EdElementCatalog.entries().size() > 60)
 
 
 func test_catalog_search() -> void:

@@ -225,7 +225,7 @@ func _build_skeleton(attr_pool: int, style_pool: int) -> void:
 	out.append("</ui:VisualElement>")
 	out.append("</ui:ScrollView></ui:UXML>")
 	var offset := Vector2.ZERO
-	if doc._doc != null and doc.get_element("scroll") != null:
+	if doc.get_document_model() != null and doc.get_element("scroll") != null:
 		offset = doc.get_scroll_offset("scroll")
 	doc.load_source("".join(out), "res://src/app/ui/__inspector__.uxml", "res://src/app/ui")
 	if offset != Vector2.ZERO:

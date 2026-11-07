@@ -152,6 +152,7 @@ func _ready() -> void:
 	drag.state = state
 	drag.palette = palette
 	add_child(drag)
+	drag.attach()
 	drag.dropped.connect(_on_dropped)
 	source.edited.connect(func(tx): state.execute(tx, "source"))
 	source.caret_moved_to.connect(_on_source_caret)
@@ -592,14 +593,14 @@ func _close_context_menu() -> void:
 	_menu_anchor = null
 
 
-## The hierarchy item id of the row under global point `at`, or -1.
+## The hierarchy item id of the row under global point `at`, or -1
+## (UxmlDocument.get_item_index_at, request R12).
 func _tree_row_at(at: Vector2) -> int:
-	for row in shell.get_list_rows("hierarchy-tree"):
-		var c: Control = row.get_element()
-		if c != null and c.is_visible_in_tree() and c.get_global_rect().has_point(at):
-			var item := shell.get_tree_item("hierarchy-tree", row.index)
-			return -1 if item.is_empty() else int(item["id"])
-	return -1
+	var index := shell.get_item_index_at("hierarchy-tree", at)
+	if index < 0:
+		return -1
+	var item := shell.get_tree_item("hierarchy-tree", index)
+	return -1 if item.is_empty() else int(item["id"])
 
 
 func _refuse(message: String) -> bool:
@@ -863,15 +864,16 @@ func _refresh_source_menu() -> void:
 	EdUi.set_label(shell, "source-state", st)
 
 
-## Queue a render at the end of the frame. `patch_ok`: the change may go
-## to the live render as a patch (EdRenderHost.patch); any full request in
-## the same frame wins.
-func _queue_render(patch_ok: bool = false) -> void:
+## Queue a render at the end of the frame. `incremental`: the change may
+## go to the live render as a partial update (EdRenderHost.update: a
+## stylesheet reload or a source replace); any full request in the same
+## frame wins.
+func _queue_render(incremental: bool = false) -> void:
 	if _render_queued:
-		_render_patch = _render_patch and patch_ok
+		_render_patch = _render_patch and incremental
 		return
 	_render_queued = true
-	_render_patch = patch_ok
+	_render_patch = incremental
 	_render.call_deferred()
 
 
@@ -881,7 +883,7 @@ func _render() -> void:
 		_refresh_hierarchy()
 		_refresh_diagnostics()
 		return
-	if _render_patch and canvas.host.patch(state.workspace, state.session.entry_path):
+	if _render_patch and canvas.host.update(state.workspace, state.session.entry_path):
 		return
 	canvas.host.render(state.workspace, state.session.entry_path, state.store.root)
 
@@ -889,9 +891,7 @@ func _render() -> void:
 func _on_rendered() -> void:
 	layout.rendered()
 	_render_diags[canvas.host.entry_path] = canvas.host.diagnostics.duplicate()
-	# A patch changes `style` or `class` only; the hierarchy shows classes.
-	if not canvas.host.last_was_patch or canvas.host.last_patch_attrs.has("class"):
-		_refresh_hierarchy()
+	_refresh_hierarchy()
 	_refresh_diagnostics()
 	_on_selection_changed("render")
 
@@ -904,7 +904,7 @@ func _on_buffers_changed(paths: Array, _cause: String, tx: EdTransaction) -> voi
 		source.reload_from_buffer()
 	elif paths.has(source_path):
 		source.reload_from_buffer()
-	_queue_render(state.session != null and paths.size() == 1 and paths[0] == state.session.entry_path and not canvas.preview)
+	_queue_render(state.session != null and not canvas.preview)
 
 
 func _refresh_files() -> void:

@@ -1,127 +1,208 @@
 class_name EdElementCatalog
 extends RefCounted
-## The elements the palette offers: every UXML element that godot-uxml
+## The elements the library offers: every UXML element that godot-uxml
 ## renders, runtime (`UnityEngine.UIElements`) and editor
 ## (`UnityEditor.UIElements`), grouped as in the Unity UI Builder library.
 ##
-## Seam for godot-uxml request R9 (a catalog API). Until R9 lands this is a
-## static table. tests/unit/test_palette.gd checks it against the tags that
-## godot-uxml knows (UssControls.IMPLICIT_CLASSES), so a tag that godot-uxml
-## adds or removes fails the suite. To move to R9, make entries() read
-## UxmlControls.catalog() and keep the entry shape.
+## The element list, the namespaces, the `container` flag and the
+## attributes come from godot-uxml (`UxmlControls.catalog()`, request R9).
+## The editor adds what godot-uxml does not know: the library group, the
+## order in the library and the attributes of a new element. The core does
+## not depend on godot-uxml at compile time: the catalog is read through
+## `source` (a Callable; by default the godot-uxml script is loaded by
+## path), so the core still loads without the addon.
 ##
-## Entry: {name, uri, group, container: bool, attributes: [[name, value]]}.
-## `container` tells where "insert at the selection" puts a new element:
-## into a container, after anything else.
+## Entry: {name, uri, group, container: bool, editor_only: bool,
+## attributes: [[name, value]] (a new element), catalog_attributes:
+## [{name, type, default[, choices]}]}.
 
 const RUNTIME := "UnityEngine.UIElements"
 const EDITOR := "UnityEditor.UIElements"
 ## The prefix a new namespace declaration gets.
 const PREFERRED_PREFIX := {RUNTIME: "ui", EDITOR: "uie"}
 const GROUPS := ["Containers", "Controls", "Inputs", "Collections", "Editor"]
+const _CONTROLS_SCRIPT := "res://addons/godot_uxml/core/uxml_controls.gd"
 
-## [name, group, container, default attributes]
-const _RUNTIME_TABLE := [
-	["VisualElement", "Containers", true, []],
-	["ScrollView", "Containers", true, []],
-	["GroupBox", "Containers", true, [["text", "Group Box"]]],
-	["Foldout", "Containers", true, [["text", "Foldout"]]],
-	["Box", "Containers", true, []],
-	["TwoPaneSplitView", "Containers", true, []],
-	["TabView", "Containers", true, []],
-	["Tab", "Containers", true, [["label", "Tab"]]],
-	["PopupWindow", "Containers", true, [["text", "Popup Window"]]],
-	["RadioButtonGroup", "Containers", true, [["label", "Radio Button Group"]]],
-	["ToggleButtonGroup", "Containers", true, [["label", "Toggle Button Group"]]],
-	["IMGUIContainer", "Containers", false, []],
-	["Label", "Controls", false, [["text", "Label"]]],
-	["TextElement", "Controls", false, [["text", "Text"]]],
-	["Button", "Controls", false, [["text", "Button"]]],
-	["RepeatButton", "Controls", false, [["text", "Repeat Button"]]],
-	["Toggle", "Controls", false, [["label", "Toggle"]]],
-	["RadioButton", "Controls", false, [["label", "Radio Button"]]],
-	["Image", "Controls", false, []],
-	["HelpBox", "Controls", false, [["text", "Help Box"], ["message-type", "Info"]]],
-	["ProgressBar", "Controls", false, [["title", "Progress"], ["value", "50"]]],
-	["Scroller", "Controls", false, []],
-	["TextField", "Inputs", false, [["label", "Text Field"]]],
-	["IntegerField", "Inputs", false, [["label", "Integer Field"]]],
-	["LongField", "Inputs", false, [["label", "Long Field"]]],
-	["FloatField", "Inputs", false, [["label", "Float Field"]]],
-	["DoubleField", "Inputs", false, [["label", "Double Field"]]],
-	["UnsignedIntegerField", "Inputs", false, [["label", "Unsigned Integer Field"]]],
-	["UnsignedLongField", "Inputs", false, [["label", "Unsigned Long Field"]]],
-	["Hash128Field", "Inputs", false, [["label", "Hash128 Field"]]],
-	["Slider", "Inputs", false, [["label", "Slider"]]],
-	["SliderInt", "Inputs", false, [["label", "Slider Int"]]],
-	["MinMaxSlider", "Inputs", false, [["label", "Min Max Slider"]]],
-	["DropdownField", "Inputs", false, [["label", "Dropdown"], ["choices", "One,Two,Three"], ["index", "0"]]],
-	["EnumField", "Inputs", false, [["label", "Enum Field"]]],
-	["Vector2Field", "Inputs", false, [["label", "Vector2 Field"]]],
-	["Vector2IntField", "Inputs", false, [["label", "Vector2Int Field"]]],
-	["Vector3Field", "Inputs", false, [["label", "Vector3 Field"]]],
-	["Vector3IntField", "Inputs", false, [["label", "Vector3Int Field"]]],
-	["Vector4Field", "Inputs", false, [["label", "Vector4 Field"]]],
-	["RectField", "Inputs", false, [["label", "Rect Field"]]],
-	["RectIntField", "Inputs", false, [["label", "RectInt Field"]]],
-	["BoundsField", "Inputs", false, [["label", "Bounds Field"]]],
-	["BoundsIntField", "Inputs", false, [["label", "BoundsInt Field"]]],
-	["ListView", "Collections", false, []],
-	["TreeView", "Collections", false, []],
-	["MultiColumnListView", "Collections", false, []],
-	["MultiColumnTreeView", "Collections", false, []],
+## The library order and groups: [name, group, attributes of a new element].
+## A catalog element that is not listed goes to the end of the group
+## that _group_of() gives it.
+const _LIBRARY := [
+	["VisualElement", "Containers", []],
+	["ScrollView", "Containers", []],
+	["GroupBox", "Containers", [["text", "Group Box"]]],
+	["Foldout", "Containers", [["text", "Foldout"]]],
+	["Box", "Containers", []],
+	["TwoPaneSplitView", "Containers", []],
+	["TabView", "Containers", []],
+	["Tab", "Containers", [["label", "Tab"]]],
+	["PopupWindow", "Containers", [["text", "Popup Window"]]],
+	["RadioButtonGroup", "Containers", [["label", "Radio Button Group"]]],
+	["ToggleButtonGroup", "Containers", [["label", "Toggle Button Group"]]],
+	["IMGUIContainer", "Containers", []],
+	["Label", "Controls", [["text", "Label"]]],
+	["TextElement", "Controls", [["text", "Text"]]],
+	["Button", "Controls", [["text", "Button"]]],
+	["RepeatButton", "Controls", [["text", "Repeat Button"]]],
+	["Toggle", "Controls", [["label", "Toggle"]]],
+	["RadioButton", "Controls", [["label", "Radio Button"]]],
+	["Image", "Controls", []],
+	["HelpBox", "Controls", [["text", "Help Box"], ["message-type", "Info"]]],
+	["ProgressBar", "Controls", [["title", "Progress"], ["value", "50"]]],
+	["Scroller", "Controls", []],
+	["TextField", "Inputs", [["label", "Text Field"]]],
+	["IntegerField", "Inputs", [["label", "Integer Field"]]],
+	["LongField", "Inputs", [["label", "Long Field"]]],
+	["FloatField", "Inputs", [["label", "Float Field"]]],
+	["DoubleField", "Inputs", [["label", "Double Field"]]],
+	["UnsignedIntegerField", "Inputs", [["label", "Unsigned Integer Field"]]],
+	["UnsignedLongField", "Inputs", [["label", "Unsigned Long Field"]]],
+	["Hash128Field", "Inputs", [["label", "Hash128 Field"]]],
+	["Slider", "Inputs", [["label", "Slider"]]],
+	["SliderInt", "Inputs", [["label", "Slider Int"]]],
+	["MinMaxSlider", "Inputs", [["label", "Min Max Slider"]]],
+	["DropdownField", "Inputs", [["label", "Dropdown"], ["choices", "One,Two,Three"], ["index", "0"]]],
+	["EnumField", "Inputs", [["label", "Enum Field"]]],
+	["Vector2Field", "Inputs", [["label", "Vector2 Field"]]],
+	["Vector2IntField", "Inputs", [["label", "Vector2Int Field"]]],
+	["Vector3Field", "Inputs", [["label", "Vector3 Field"]]],
+	["Vector3IntField", "Inputs", [["label", "Vector3Int Field"]]],
+	["Vector4Field", "Inputs", [["label", "Vector4 Field"]]],
+	["RectField", "Inputs", [["label", "Rect Field"]]],
+	["RectIntField", "Inputs", [["label", "RectInt Field"]]],
+	["BoundsField", "Inputs", [["label", "Bounds Field"]]],
+	["BoundsIntField", "Inputs", [["label", "BoundsInt Field"]]],
+	["ListView", "Collections", []],
+	["TreeView", "Collections", []],
+	["MultiColumnListView", "Collections", []],
+	["MultiColumnTreeView", "Collections", []],
+	# UnityEditor.UIElements
+	["Toolbar", "Editor", []],
+	["ToolbarButton", "Editor", [["text", "Button"]]],
+	["ToolbarToggle", "Editor", [["text", "Toggle"]]],
+	["ToolbarMenu", "Editor", [["text", "Menu"]]],
+	["ToolbarSpacer", "Editor", []],
+	["ToolbarBreadcrumbs", "Editor", []],
+	["ToolbarSearchField", "Editor", []],
+	["ToolbarPopupSearchField", "Editor", []],
+	["ColorField", "Editor", [["label", "Color Field"]]],
+	["CurveField", "Editor", [["label", "Curve Field"]]],
+	["GradientField", "Editor", [["label", "Gradient Field"]]],
+	["ObjectField", "Editor", [["label", "Object Field"]]],
+	["EnumFlagsField", "Editor", [["label", "Enum Flags Field"]]],
+	["MaskField", "Editor", [["label", "Mask Field"], ["choices", "One,Two,Three"]]],
+	["LayerField", "Editor", [["label", "Layer Field"]]],
+	["LayerMaskField", "Editor", [["label", "Layer Mask Field"]]],
+	["RenderingLayerMaskField", "Editor", [["label", "Rendering Layer Mask Field"]]],
+	["TagField", "Editor", [["label", "Tag Field"]]],
+	["PropertyField", "Editor", [["label", "Property Field"]]],
+	["InspectorElement", "Editor", []],
 ]
 
-const _EDITOR_TABLE := [
-	["Toolbar", "Editor", true, []],
-	["ToolbarButton", "Editor", false, [["text", "Button"]]],
-	["ToolbarToggle", "Editor", false, [["text", "Toggle"]]],
-	["ToolbarMenu", "Editor", false, [["text", "Menu"]]],
-	["ToolbarSpacer", "Editor", false, []],
-	["ToolbarBreadcrumbs", "Editor", false, []],
-	["ToolbarSearchField", "Editor", false, []],
-	["ToolbarPopupSearchField", "Editor", false, []],
-	["ColorField", "Editor", false, [["label", "Color Field"]]],
-	["CurveField", "Editor", false, [["label", "Curve Field"]]],
-	["GradientField", "Editor", false, [["label", "Gradient Field"]]],
-	["ObjectField", "Editor", false, [["label", "Object Field"]]],
-	["EnumFlagsField", "Editor", false, [["label", "Enum Flags Field"]]],
-	["MaskField", "Editor", false, [["label", "Mask Field"], ["choices", "One,Two,Three"]]],
-	["LayerField", "Editor", false, [["label", "Layer Field"]]],
-	["LayerMaskField", "Editor", false, [["label", "Layer Mask Field"]]],
-	["RenderingLayerMaskField", "Editor", false, [["label", "Rendering Layer Mask Field"]]],
-	["TagField", "Editor", false, [["label", "Tag Field"]]],
-	["PropertyField", "Editor", false, [["label", "Property Field"]]],
-	["InspectorElement", "Editor", true, []],
-]
-
-## Tags that godot-uxml knows but that are not authored as palette items:
-## control parts, column UxmlObjects (they live inside a multi-column
-## view), and the template container (an <Instance> makes one).
-const NOT_IN_PALETTE := [
-	"TemplateContainer", "TextInput", "IntegerInput", "LongInput", "FloatInput",
+## Control parts: godot-uxml makes them inside a control; the catalog
+## does not list them, and an author does not write them.
+const PARTS := [
+	"TextInput", "IntegerInput", "LongInput", "FloatInput",
 	"DoubleInput", "UnsignedIntegerInput", "UnsignedLongInput", "Hash128Input",
 	"PopupTextElement", "ObjectFieldDisplay", "ObjectFieldSelector", "BreadcrumbItem",
-	"PopupField`1", "Columns", "Column", "SortColumnDescriptions", "SortColumnDescription",
+	"PopupField`1",
 ]
+## Catalog elements that the library does not offer: the template
+## container (an <Instance> makes one).
+const NOT_IN_LIBRARY := ["TemplateContainer"]
+## Structural UXML tags (not elements of the catalog).
+const STRUCTURAL := ["UXML", "Style", "Template", "Instance", "AttributeOverrides"]
+
+## Reads the godot-uxml catalog: () -> Array (UxmlControls.catalog()).
+## Not set: the godot-uxml script is loaded by path.
+static var source: Callable
 
 static var _entries: Array = []
 static var _by_name: Dictionary = {}
+## Every catalog element by name (UxmlObjects and the template container
+## too), and the names that the library does not show.
+static var _catalog: Dictionary = {}
+static var _hidden: Dictionary = {}
 
 
+static func _default_source() -> Array:
+	if not ResourceLoader.exists(_CONTROLS_SCRIPT):
+		return []
+	return load(_CONTROLS_SCRIPT).catalog()
+
+
+## Read the catalog again (after `source` changed).
+static func reset() -> void:
+	_entries = []
+	_by_name = {}
+	_catalog = {}
+	_hidden = {}
+
+
+## The library entries, in library order.
 static func entries() -> Array:
-	if _entries.is_empty():
-		for row in _RUNTIME_TABLE:
-			_add(row, RUNTIME)
-		for row in _EDITOR_TABLE:
-			_add(row, EDITOR)
+	if not _catalog.is_empty() or not _entries.is_empty():
+		return _entries
+	var cat: Array = source.call() if source.is_valid() else _default_source()
+	for c in cat:
+		_catalog[c["name"]] = c
+		if c.get("uxml_object", false) or NOT_IN_LIBRARY.has(c["name"]):
+			_hidden[c["name"]] = true
+	var listed := {}
+	var by_group := {}
+	for g in GROUPS:
+		by_group[g] = []
+	for row in _LIBRARY:
+		var c = _catalog.get(row[0])
+		if c == null or _hidden.has(row[0]):
+			continue
+		listed[row[0]] = true
+		by_group[row[1]].append(_entry(c, row[1], row[2]))
+	for name in _catalog:
+		if listed.has(name) or _hidden.has(name):
+			continue
+		var c: Dictionary = _catalog[name]
+		var g := _group_of(c)
+		by_group[g].append(_entry(c, g, []))
+	for g in GROUPS:
+		for e in by_group[g]:
+			_entries.append(e)
+			_by_name[e["name"]] = e
 	return _entries
 
 
-static func _add(row: Array, uri: String) -> void:
-	var e := {"name": row[0], "uri": uri, "group": row[1], "container": row[2], "attributes": row[3]}
-	_entries.append(e)
-	_by_name[row[0]] = e
+static func _group_of(c: Dictionary) -> String:
+	if c.get("editor_only", false):
+		return "Editor"
+	if c.get("container", false):
+		return "Containers"
+	var n := String(c["name"])
+	if n.ends_with("Field") or n.contains("Slider"):
+		return "Inputs"
+	if n.ends_with("View"):
+		return "Collections"
+	return "Controls"
+
+
+static func _entry(c: Dictionary, group: String, attrs: Array) -> Dictionary:
+	return {"name": c["name"], "uri": c["namespace"], "group": group, "container": bool(c.get("container", false)),
+		"editor_only": bool(c.get("editor_only", false)), "attributes": attrs,
+		"catalog_attributes": c.get("attributes", [])}
+
+
+## The catalog attributes of an element ([{name, type, default[,
+## choices]}]), or [] for an element that godot-uxml does not know.
+static func attributes_of(local: String) -> Array:
+	entries()
+	var c = _catalog.get(local)
+	return [] if c == null else c.get("attributes", [])
+
+
+## The catalog attribute `attr` of element `local`, or {}.
+static func attribute(local: String, attr: String) -> Dictionary:
+	for a in attributes_of(local):
+		if a["name"] == attr:
+			return a
+	return {}
 
 
 ## The entry of an element local name, or {} for a tag the catalog does
@@ -132,8 +213,8 @@ static func find(local: String) -> Dictionary:
 
 
 static func is_known(local: String) -> bool:
-	return not find(local).is_empty() or NOT_IN_PALETTE.has(local) \
-		or ["UXML", "Style", "Template", "Instance", "AttributeOverrides"].has(local)
+	entries()
+	return _catalog.has(local) or PARTS.has(local) or STRUCTURAL.has(local)
 
 
 ## True when "insert at the selection" puts a new element inside `node`.
@@ -145,10 +226,11 @@ static func accepts_children(node: EdUxmlNode) -> bool:
 		return true
 	if node.local == "Style" or node.local == "Template":
 		return false
-	var e := find(node.local)
-	if e.is_empty():
-		return not NOT_IN_PALETTE.has(node.local)
-	return e["container"]
+	entries()
+	var c = _catalog.get(node.local)
+	if c == null:
+		return not PARTS.has(node.local)
+	return bool(c.get("container", false)) and not c.get("uxml_object", false)
 
 
 ## Entries whose name contains every word of `query` (case-insensitive),

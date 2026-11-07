@@ -1,25 +1,34 @@
 class_name EdDragController
 extends Control
-## Drag and drop between the views: a palette element to the canvas or the
+## Drag and drop between the views: a library element to the canvas or the
 ## hierarchy (insert), and hierarchy elements to the canvas or the
 ## hierarchy (move: reorder or reparent).
 ##
-## The controller watches the raw mouse events of the window (EdMain
-## forwards them from _input) and never takes the press, so the lists
-## still select. A drag starts after DRAG_START pixels. The drop position
-## comes from the row under the pointer (hierarchy: the top quarter drops
-## before, the bottom quarter after, the middle into a container) or from
-## the element under the pointer (canvas: the deepest container, and the
-## child index along its flex direction).
+## godot-uxml runs the drag (request R12): the library and the hierarchy
+## TreeViews get Unity's four drag-and-drop callbacks
+## (UxmlDocument.set_drag_and_drop). A drag starts after 5 pixels; the
+## pressed row keeps the mouse until the release. Over the hierarchy,
+## godot-uxml gives the drop arguments: the 5-pixel bands at the top and
+## the bottom of a row drop between items (the parent and the child index
+## come from the tree), the rest of a row drops over the item. Over a
+## container the drop goes into the container, at the end. Over an element
+## that takes no children the drop goes before the row (the upper half) or
+## after it (the lower half). Outside every collection, items_drag_updated
+## and items_drag_ended give an empty target and "outside": the canvas
+## takes the drop at the deepest container under the pointer, at the
+## child index along its flex direction.
 ##
-## Native Godot control: this full-window Control draws the drag label and
-## the hierarchy drop line over the godot-uxml shell (godot-uxml has no
-## drag-and-drop API; request R12). It ignores the mouse.
+## Native Godot control: this full-window Control draws the drag title and
+## the drop line of a before/after drop over a leaf row over the
+## godot-uxml shell. godot-uxml draws the drop indicator of a collection
+## (a bar between items, an outline over an item) but not the title at the
+## pointer. It ignores the mouse.
 
 signal dropped(payload: Dictionary, target: Dictionary)
 
-const DRAG_START := 6.0
 const DROP := Color(1.0, 0.7, 0.2)
+const PALETTE := "palette-tree"
+const HIERARCHY := "hierarchy-tree"
 
 var shell: UxmlDocument
 var canvas: EdCanvasView
@@ -31,7 +40,9 @@ var payload: Dictionary = {}
 ## {where: "canvas"|"hierarchy", parent: EdUxmlNode, index: int,
 ##  line: [Vector2, Vector2] (global), rect: Rect2 (global)}
 var target: Dictionary = {}
-var _press: Dictionary = {}
+## The result of the last drag ("dropped", "rejected", "outside",
+## "canceled"; tests).
+var last_result := ""
 var _mouse := Vector2.ZERO
 var _font: Font
 
@@ -42,133 +53,145 @@ func _init() -> void:
 	_font = ThemeDB.fallback_font
 
 
+## Give the library and the hierarchy their callbacks and connect the drag
+## signals of the shell. After each load of the shell.
+func attach() -> void:
+	shell.set_drag_and_drop(PALETTE, {
+		"can_start_drag": func(a): return not palette.entry_at(int(a["index"])).is_empty(),
+		"setup_drag_and_drop": _setup,
+		"drag_and_drop_update": func(_a): return UxmlDocument.DragVisualMode.REJECTED,
+	})
+	shell.set_drag_and_drop(HIERARCHY, {
+		"can_start_drag": _can_start_hierarchy,
+		"setup_drag_and_drop": _setup,
+		"drag_and_drop_update": _hierarchy_update,
+		"handle_drop": _hierarchy_drop,
+	})
+	if not shell.items_drag_started.is_connected(_on_started):
+		shell.items_drag_started.connect(_on_started)
+		shell.items_drag_updated.connect(_on_updated)
+		shell.items_drag_ended.connect(_on_ended)
+
+
 func is_dragging() -> bool:
 	return not payload.is_empty()
 
 
-## Returns true when the event was used (the drop release).
+## Escape cancels a drag (godot-uxml also cancels on Escape in the focused
+## list). Returns true when the event was used.
 func handle_input(ev: InputEvent) -> bool:
-	if ev is InputEventMouseButton:
-		var mb := ev as InputEventMouseButton
-		if mb.button_index != MOUSE_BUTTON_LEFT:
-			return false
-		if mb.pressed:
-			_press = {}
-			var p := payload_at(mb.global_position)
-			if not p.is_empty():
-				_press = {"pos": mb.global_position, "payload": p}
-			return false
-		var was := is_dragging()
-		if was:
-			_update_target(mb.global_position)
-			if not target.is_empty():
-				dropped.emit(payload, target)
-		cancel()
-		return was
-	if ev is InputEventMouseMotion:
-		var mm := ev as InputEventMouseMotion
-		_mouse = mm.global_position
-		if not is_dragging() and not _press.is_empty() and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0 \
-				and mm.global_position.distance_to(_press["pos"]) >= DRAG_START:
-			begin(_press["payload"])
-		if is_dragging():
-			_update_target(mm.global_position)
-			return true
-		return false
 	if ev is InputEventKey and (ev as InputEventKey).pressed and (ev as InputEventKey).keycode == KEY_ESCAPE and is_dragging():
-		cancel()
+		shell.cancel_drag()
 		return true
 	return false
 
 
-func begin(p: Dictionary) -> void:
-	payload = p
-	_press = {}
-	queue_redraw()
-
-
 func cancel() -> void:
+	if not shell.get_drag().is_empty():
+		shell.cancel_drag()
+	_clear()
+
+
+func _clear() -> void:
 	payload = {}
 	target = {}
-	_press = {}
 	canvas.drop_hint = {}
 	queue_redraw()
 
 
 # ---------------------------------------------------------------------------
-# Sources
+# Sources (Unity canStartDrag, setupDragAndDrop)
 # ---------------------------------------------------------------------------
 
-## What a press at `pos` would drag: a palette element, the hierarchy
-## selection (when the press is on a selected row) or the pressed row.
-func payload_at(pos: Vector2) -> Dictionary:
+## What a drag of `args` (the godot-uxml drag arguments) takes.
+func payload_for(list: String, args: Dictionary) -> Dictionary:
 	if state.session == null:
 		return {}
-	var r := row_at("palette-tree", pos)
-	if not r.is_empty():
-		var e := palette.entry_at(r["index"])
-		if not e.is_empty():
-			return {"kind": "palette", "entry": e, "label": "+ " + String(e["name"])}
-		return {}
-	r = row_at("hierarchy-tree", pos)
-	if not r.is_empty():
-		var n := _tree_node(r["index"])
-		if n == null or n.parent == null:
+	if list == PALETTE:
+		var e := palette.entry_at(int(args["index"]))
+		if e.is_empty():
 			return {}
-		var locs: Array = [EdLocator.create(n)]
-		for l in state.selection:
-			if state.session.resolve(l) == n:
-				locs = state.selection.duplicate(true)
-				break
-		return {"kind": "nodes", "locs": locs, "label": "Move %s" % n.local if locs.size() == 1 else "Move %d elements" % locs.size()}
-	return {}
-
-
-## {index, rect} of the bound row of collection `list` at global `pos`.
-## Uses only public godot-uxml calls: get_list_rows() and
-## UxmlListRow.get_element().
-func row_at(list: String, pos: Vector2) -> Dictionary:
-	var lc := shell.get_element(list)
-	if lc == null or not lc.is_visible_in_tree() or not lc.get_global_rect().has_point(pos):
-		return {}
-	for row in shell.get_list_rows(list):
-		var ur := row as UxmlListRow
-		if ur == null or ur.index < 0:
-			continue
-		var c := ur.get_element()
-		if c == null or not c.is_visible_in_tree():
-			continue
-		var rr := c.get_global_rect()
-		if rr.has_point(pos):
-			return {"index": ur.index, "rect": rr}
-	return {}
-
-
-func _tree_node(index: int) -> EdUxmlNode:
-	var item := shell.get_tree_item("hierarchy-tree", index)
-	if item.is_empty() or state.session == null:
-		return null
+		return {"kind": "palette", "entry": e, "label": "+ " + String(e["name"])}
 	var t := state.session.tree()
-	var id := int(item["id"])
-	return t.nodes[id] if id >= 0 and id < t.nodes.size() else null
+	var nodes: Array = []
+	for id in args.get("ids", []):
+		var i := int(id)
+		if i >= 0 and i < t.nodes.size() and t.nodes[i].parent != null:
+			nodes.append(t.nodes[i])
+	nodes = EdStructureCommands.top_level(nodes)
+	if nodes.is_empty():
+		return {}
+	var locs: Array = nodes.map(func(n): return EdLocator.create(n))
+	return {"kind": "nodes", "locs": locs, "label": "Move %s" % nodes[0].local if nodes.size() == 1 else "Move %d elements" % nodes.size()}
+
+
+func _can_start_hierarchy(a: Dictionary) -> bool:
+	return not payload_for(HIERARCHY, a).is_empty()
+
+
+func _setup(a: Dictionary) -> Dictionary:
+	var p := payload_for(String(a["element_name"]), a)
+	return {"title": p.get("label", ""), "data": p}
+
+
+func _on_started(_list: String, _indices: Array, at: Vector2) -> void:
+	var d := shell.get_drag()
+	payload = d.get("data", {}) if d.get("data") is Dictionary else {}
+	_mouse = at
+	queue_redraw()
 
 
 # ---------------------------------------------------------------------------
-# Targets
+# Targets (Unity dragAndDropUpdate, handleDrop)
 # ---------------------------------------------------------------------------
 
-func _update_target(pos: Vector2) -> void:
-	_mouse = pos
-	target = hierarchy_target(pos)
-	if target.is_empty():
-		target = canvas_target(pos)
-	if not target.is_empty() and not _valid(target):
+func _hierarchy_update(a: Dictionary) -> int:
+	if payload.is_empty() and a.get("data") is Dictionary:
+		payload = a["data"]
+	var t := hierarchy_target(a)
+	if t.is_empty() or not _valid(t):
+		return UxmlDocument.DragVisualMode.REJECTED
+	return UxmlDocument.DragVisualMode.COPY if payload_kind(a) == "palette" else UxmlDocument.DragVisualMode.MOVE
+
+
+func _hierarchy_drop(a: Dictionary) -> int:
+	var t := hierarchy_target(a)
+	if t.is_empty() or not _valid(t):
+		return UxmlDocument.DragVisualMode.REJECTED
+	var p: Dictionary = a.get("data", {}) if a.get("data") is Dictionary else payload
+	dropped.emit(p, t)
+	return UxmlDocument.DragVisualMode.COPY if p.get("kind") == "palette" else UxmlDocument.DragVisualMode.MOVE
+
+
+static func payload_kind(a: Dictionary) -> String:
+	var d = a.get("data")
+	return String(d.get("kind", "")) if d is Dictionary else ""
+
+
+func _on_updated(_list: String, at: Vector2, drop: Dictionary) -> void:
+	_mouse = at
+	if drop.is_empty():
+		target = canvas_target(at)
+		if not target.is_empty() and not _valid(target):
+			target = {}
+	elif String(drop.get("element_name", "")) == HIERARCHY and int(drop.get("visual_mode", 0)) != UxmlDocument.DragVisualMode.REJECTED:
+		target = hierarchy_target(drop)
+	else:
 		target = {}
 	if not target.is_empty() and target["where"] == "canvas":
 		canvas.drop_hint = {"rect": target["doc_rect"], "line": target["doc_line"]}
 	else:
 		canvas.drop_hint = {}
 	queue_redraw()
+
+
+func _on_ended(_list: String, at: Vector2, result: String) -> void:
+	last_result = result
+	if result == "outside" and not payload.is_empty():
+		var t := canvas_target(at)
+		if not t.is_empty() and _valid(t):
+			dropped.emit(payload, t)
+	_clear()
 
 
 ## A move may not go into a moved element or below it.
@@ -183,33 +206,54 @@ func _valid(t: Dictionary) -> bool:
 	return true
 
 
-func hierarchy_target(pos: Vector2) -> Dictionary:
-	var lc := shell.get_element("hierarchy-tree")
-	if lc == null or not lc.get_global_rect().has_point(pos) or state.session == null:
+func _tree_node(index: int) -> EdUxmlNode:
+	var item := shell.get_tree_item(HIERARCHY, index)
+	if item.is_empty() or state.session == null:
+		return null
+	return _node_by_id(int(item["id"]))
+
+
+func _node_by_id(id: int) -> EdUxmlNode:
+	var t := state.session.tree()
+	return t.nodes[id] if id >= 0 and id < t.nodes.size() else null
+
+
+## The drop of godot-uxml drop arguments `a` over the hierarchy.
+func hierarchy_target(a: Dictionary) -> Dictionary:
+	if state.session == null:
 		return {}
 	var root := state.session.root()
 	if root == null:
 		return {}
-	var r := row_at("hierarchy-tree", pos)
-	if r.is_empty():
-		var lr := lc.get_global_rect()
-		return {"where": "hierarchy", "parent": root, "index": root.children.size(),
-			"line": [], "rect": lr}
-	var n := _tree_node(r["index"])
-	if n == null:
-		return {}
-	var rr: Rect2 = r["rect"]
-	var f := (pos.y - rr.position.y) / maxf(rr.size.y, 1.0)
-	var top := [rr.position, Vector2(rr.end.x, rr.position.y)]
-	var bottom := [Vector2(rr.position.x, rr.end.y), rr.end]
-	if n.parent == null:
-		return {"where": "hierarchy", "parent": n, "index": n.children.size(), "line": [], "rect": rr}
-	var container := EdElementCatalog.accepts_children(n)
-	if f < 0.25 or (not container and f < 0.5):
-		return {"where": "hierarchy", "parent": n.parent, "index": n.index_in_parent, "line": top, "rect": Rect2()}
-	if f > 0.75 or not container:
-		return {"where": "hierarchy", "parent": n.parent, "index": n.index_in_parent + 1, "line": bottom, "rect": Rect2()}
-	return {"where": "hierarchy", "parent": n, "index": n.children.size(), "line": [], "rect": rr}
+	var whole := Rect2()
+	var lc := shell.get_element(HIERARCHY)
+	if lc != null:
+		whole = lc.get_global_rect()
+	match int(a.get("drop_position", UxmlDocument.DragPosition.OUTSIDE_ITEMS)):
+		UxmlDocument.DragPosition.OVER_ITEM:
+			var n := _tree_node(int(a["index"]))
+			if n == null:
+				return {}
+			var rr := shell.get_item_rect(HIERARCHY, int(a["index"]))
+			if n.parent == null or EdElementCatalog.accepts_children(n):
+				return {"where": "hierarchy", "parent": n, "index": n.children.size(), "line": [], "rect": rr}
+			var pos: Vector2 = a.get("position", rr.get_center())
+			if pos.y < rr.get_center().y:
+				return {"where": "hierarchy", "parent": n.parent, "index": n.index_in_parent,
+					"line": [rr.position, Vector2(rr.end.x, rr.position.y)], "rect": Rect2()}
+			return {"where": "hierarchy", "parent": n.parent, "index": n.index_in_parent + 1,
+				"line": [Vector2(rr.position.x, rr.end.y), rr.end], "rect": Rect2()}
+		UxmlDocument.DragPosition.BETWEEN_ITEMS:
+			var pid = a.get("parent_id")
+			var ci := int(a.get("child_index", -1))
+			if pid == null:
+				# Before or after the UXML root: the start or the end of the root.
+				return {"where": "hierarchy", "parent": root, "index": 0 if ci == 0 else root.children.size(), "line": [], "rect": Rect2()}
+			var p := _node_by_id(int(pid))
+			if p == null:
+				return {}
+			return {"where": "hierarchy", "parent": p, "index": p.children.size() if ci < 0 else mini(ci, p.children.size()), "line": [], "rect": Rect2()}
+	return {"where": "hierarchy", "parent": root, "index": root.children.size(), "line": [], "rect": whole}
 
 
 func canvas_target(pos: Vector2) -> Dictionary:
@@ -288,9 +332,6 @@ func _draw() -> void:
 		var line: Array = target["line"]
 		if line.size() == 2:
 			draw_line(inv * line[0], inv * line[1], DROP, 2.0)
-		var r: Rect2 = target["rect"]
-		if r.size != Vector2.ZERO:
-			draw_rect(Rect2(inv * r.position, r.size), DROP, false, 1.0)
 	var label: String = payload.get("label", "")
 	if target.is_empty():
 		label += "  (no drop here)"
