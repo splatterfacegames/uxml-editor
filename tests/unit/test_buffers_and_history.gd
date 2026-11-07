@@ -114,3 +114,17 @@ func test_locator_survives_reparse_and_reorders() -> void:
 	var n := s.resolve(loc)
 	ok(n != null and n.name == "ui:Button", "unique structural match still resolves")
 	eq(n.child_path(), [0])
+
+
+func test_reload_from_disk_forgets_only_unsafe_steps() -> void:
+	var ws := EdWorkspace.new()
+	ws.set_buffer("a.uss", EdSourceBuffer.new("a.uss", "a"))
+	ws.set_buffer("b.uss", EdSourceBuffer.new("b.uss", "b"))
+	ws.history.execute(ws.replace_text_transaction("b.uss", "b1", "B1"))
+	ws.history.execute(ws.replace_text_transaction("a.uss", "a1", "A1"))
+	ws.history.execute(ws.replace_text_transaction("b.uss", "b2", "B2"))
+	ws.set_buffer("a.uss", EdSourceBuffer.new("a.uss", "from disk"), {}, "reload")
+	eq(ws.history.undo_depth(), 1, "only the step after the last a.uss step stays")
+	ws.history.undo()
+	eq([ws.text("a.uss"), ws.text("b.uss")], ["from disk", "b1"])
+	eq(ws.history.can_undo(), false)

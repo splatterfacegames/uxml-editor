@@ -1,0 +1,110 @@
+/* Inspector document (generated per selection). */
+
+.inspector {
+    flex-grow: 1;
+    background-color: rgb(56, 56, 56);
+}
+
+.empty {
+    margin: 12px;
+    color: rgb(160, 160, 160);
+    white-space: normal;
+}
+
+.title-row {
+    flex-direction: row;
+    align-items: flex-end;
+    padding-left: 8px;
+    padding-top: 8px;
+}
+
+.title {
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: rgb(230, 230, 230);
+}
+
+.title-prefix {
+    color: rgb(140, 140, 140);
+    margin-left: 4px;
+}
+
+.title-name {
+    color: rgb(130, 180, 240);
+    margin-left: 6px;
+}
+
+.subtitle {
+    color: rgb(140, 140, 140);
+    padding-left: 8px;
+    margin-bottom: 6px;
+}
+
+.section {
+    margin-top: 2px;
+    border-top-width: 1px;
+    border-top-color: rgb(36, 36, 36);
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+    padding-right: 4px;
+}
+
+.field {
+    flex-grow: 1;
+    flex-shrink: 1;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.field > .unity-label {
+    min-width: 120px;
+    width: 120px;
+}
+
+.unset > .unity-label {
+    color: rgb(150, 150, 150);
+}
+
+.remove {
+    width: 20px;
+    height: 18px;
+    padding: 0;
+    margin-left: 2px;
+}
+
+.add-row {
+    flex-direction: row;
+    padding-right: 4px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.add-name {
+    width: 130px;
+    flex-shrink: 0;
+}
+
+.add-value {
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.add-button {
+    width: 44px;
+}
+
+.hint {
+    color: rgb(140, 140, 140);
+    padding-left: 4px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+    -unity-font-style: italic;
+}
+
+.readout {
+    padding-left: 4px;
+    color: rgb(200, 200, 200);
+}

@@ -40,9 +40,12 @@ func text(path: String) -> String:
 	return "" if b == null else b.text
 
 
-## Add or replace a buffer from disk (or from a test). Clears no history:
-## a reload of a clean file keeps the undo steps of other files valid.
+## Add or replace a buffer from disk (or from a test). Replacing a buffer
+## drops the undo steps that touch it (EdCommandHistory.forget_path); the
+## steps of other files stay.
 func set_buffer(path: String, b: EdSourceBuffer, revision: Dictionary = {}, cause: String = "load") -> void:
+	if buffers.has(path):
+		history.forget_path(path)
 	buffers[path] = b
 	base[path] = {"text": b.text, "bom": b.bom, "revision": revision}
 	_uxml_cache.erase(path)

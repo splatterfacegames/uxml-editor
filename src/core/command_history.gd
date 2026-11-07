@@ -95,6 +95,32 @@ func break_coalescing() -> void:
 	_coalescing = false
 
 
+## `path` was replaced from disk: its undo steps no longer apply. Drop the
+## newest step that touches it and every older step (newer steps touch
+## other files only and stay valid), and the whole redo stack.
+func forget_path(path: String) -> void:
+	var cut := -1
+	for i in range(_undo.size() - 1, -1, -1):
+		if _touches(_undo[i], path):
+			cut = i
+			break
+	if cut >= 0:
+		_undo = _undo.slice(cut + 1)
+	for e in _redo:
+		if _touches(e, path):
+			_redo.clear()
+			break
+	_coalescing = false
+	history_changed.emit()
+
+
+static func _touches(entry: Dictionary, path: String) -> bool:
+	for tx in entry["forward"]:
+		if tx.patches_by_file.has(path):
+			return true
+	return false
+
+
 func clear() -> void:
 	_undo.clear()
 	_redo.clear()

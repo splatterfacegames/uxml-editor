@@ -1,0 +1,112 @@
+/* Editor window layout. Colours and control looks come from the godot-uxml
+   Unity editor dark skin; this sheet adds layout and the editor accents. */
+
+.window {
+    --accent: rgb(58, 121, 187);
+    --panel-border: rgb(25, 25, 25);
+    --header-bg: rgb(52, 52, 52);
+}
+
+.window {
+    flex-grow: 1;
+    background-color: rgb(40, 40, 40);
+}
+
+.grow {
+    flex-grow: 1;
+}
+
+.main-toolbar {
+    flex-shrink: 0;
+}
+
+#preset-menu {
+    min-width: 150px;
+}
+
+#theme-menu {
+    min-width: 120px;
+}
+
+.zoom-label {
+    width: 44px;
+    -unity-text-align: middle-center;
+    align-self: center;
+}
+
+.document-label {
+    align-self: center;
+    margin-right: 8px;
+    color: rgb(170, 170, 170);
+}
+
+.panel {
+    flex-grow: 1;
+    background-color: rgb(56, 56, 56);
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-color: var(--panel-border);
+    overflow: hidden;
+}
+
+.panel-header {
+    height: 21px;
+    padding-left: 8px;
+    -unity-text-align: middle-left;
+    -unity-font-style: bold;
+    background-color: var(--header-bg);
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+    flex-shrink: 0;
+}
+
+.panel-header-row {
+    flex-direction: row;
+    flex-shrink: 0;
+    background-color: var(--header-bg);
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+}
+
+.panel-header-row > .panel-header {
+    border-bottom-width: 0;
+}
+
+.source-file-menu {
+    min-width: 200px;
+}
+
+.source-state {
+    -unity-text-align: middle-left;
+    color: rgb(170, 170, 170);
+    margin-left: 6px;
+}
+
+.panel-list {
+    background-color: rgb(48, 48, 48);
+}
+
+.host {
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.status-bar {
+    flex-direction: row;
+    height: 22px;
+    flex-shrink: 0;
+    background-color: rgb(32, 32, 32);
+    border-top-width: 1px;
+    border-top-color: var(--panel-border);
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.status-label {
+    -unity-text-align: middle-left;
+    color: rgb(180, 180, 180);
+}
+
+.status-label.error {
+    color: rgb(240, 120, 110);
+}

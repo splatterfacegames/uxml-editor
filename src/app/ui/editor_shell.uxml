@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The editor window. godot-uxml renders this document with the Unity
+  editor dark skin. Native Godot controls go into the *-host elements:
+  the canvas (a SubViewport), the source view (CodeEdit) and the inspector
+  (a second godot-uxml document made for each selection).
+-->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <Style src="editor_shell.uss" />
+  <ui:VisualElement name="window" class="window">
+    <uie:Toolbar name="toolbar" class="main-toolbar">
+      <uie:ToolbarButton name="open-button" text="Open Project…" tooltip="Open a project directory (Ctrl+O)" />
+      <uie:ToolbarButton name="save-button" text="Save" tooltip="Save the active document and its stylesheets (Ctrl+S)" />
+      <uie:ToolbarButton name="save-all-button" text="Save All" tooltip="Save every changed file (Ctrl+Shift+S)" />
+      <uie:ToolbarSpacer />
+      <uie:ToolbarButton name="undo-button" text="Undo" tooltip="Undo (Ctrl+Z)" />
+      <uie:ToolbarButton name="redo-button" text="Redo" tooltip="Redo (Ctrl+Y)" />
+      <uie:ToolbarSpacer />
+      <uie:ToolbarMenu name="preset-menu" text="1280 × 720" tooltip="Screen size of the canvas" />
+      <uie:ToolbarMenu name="theme-menu" text="Auto theme" tooltip="Theme the document renders with" />
+      <uie:ToolbarSpacer />
+      <uie:ToolbarButton name="zoom-out-button" text="−" tooltip="Zoom out (Ctrl+-)" />
+      <ui:Label name="zoom-label" class="zoom-label" text="100%" />
+      <uie:ToolbarButton name="zoom-in-button" text="+" tooltip="Zoom in (Ctrl+=)" />
+      <uie:ToolbarButton name="fit-button" text="Fit" tooltip="Fit the screen in the canvas (F)" />
+      <uie:ToolbarSpacer class="grow" />
+      <ui:Label name="document-label" class="document-label" text="No project" />
+    </uie:Toolbar>
+    <ui:TwoPaneSplitView name="main-split" fixed-pane-index="0" fixed-pane-initial-dimension="280" class="grow">
+      <ui:TwoPaneSplitView name="left-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="220">
+        <ui:VisualElement class="panel">
+          <ui:Label class="panel-header" text="Project" />
+          <ui:ListView name="files-list" fixed-item-height="20" selection-type="Single" class="grow panel-list" />
+        </ui:VisualElement>
+        <ui:VisualElement class="panel">
+          <ui:Label class="panel-header" text="Hierarchy" />
+          <ui:TreeView name="hierarchy-tree" auto-expand="true" fixed-item-height="20" selection-type="Single" class="grow panel-list" />
+        </ui:VisualElement>
+      </ui:TwoPaneSplitView>
+      <ui:TwoPaneSplitView name="right-split" fixed-pane-index="1" fixed-pane-initial-dimension="340">
+        <ui:TwoPaneSplitView name="center-split" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="280">
+          <ui:VisualElement class="panel">
+            <ui:Label name="canvas-header" class="panel-header" text="Canvas" />
+            <ui:VisualElement name="canvas-host" class="host grow" />
+          </ui:VisualElement>
+          <ui:VisualElement class="panel">
+            <ui:VisualElement class="panel-header-row">
+              <ui:Label class="panel-header" text="Source" />
+              <uie:ToolbarMenu name="source-file-menu" class="source-file-menu" text="(no file)" tooltip="File shown in the source view" />
+              <ui:Label name="source-state" class="source-state grow" text="" />
+            </ui:VisualElement>
+            <ui:TwoPaneSplitView name="source-split" fixed-pane-index="1" fixed-pane-initial-dimension="300" class="grow">
+              <ui:VisualElement name="source-host" class="host" />
+              <ui:VisualElement class="panel">
+                <ui:Label name="diagnostics-header" class="panel-header" text="Diagnostics" />
+                <ui:ListView name="diagnostics-list" fixed-item-height="18" selection-type="Single" class="grow panel-list" />
+              </ui:VisualElement>
+            </ui:TwoPaneSplitView>
+          </ui:VisualElement>
+        </ui:TwoPaneSplitView>
+        <ui:VisualElement class="panel">
+          <ui:Label class="panel-header" text="Inspector" />
+          <ui:VisualElement name="inspector-host" class="host grow" />
+        </ui:VisualElement>
+      </ui:TwoPaneSplitView>
+    </ui:TwoPaneSplitView>
+    <ui:VisualElement name="status-bar" class="status-bar">
+      <ui:Label name="status-label" class="status-label grow" text="Open a project directory to begin." />
+      <ui:Label name="history-label" class="status-label" text="" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>
