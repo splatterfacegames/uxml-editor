@@ -346,9 +346,8 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	out.append("</ui:VisualElement>")
 	# Classes.
 	out.append("<ui:Foldout name=\"class-section\" text=\"Classes\" value=\"true\" class=\"section\">")
-	out.append("<ui:Label name=\"class-none\" class=\"hint\" text=\"No classes.\" />")
 	for b in class_pool / POOL_STEP:
-		out.append("<ui:VisualElement name=\"block-class-%d\" class=\"block hidden\">" % b)
+		out.append("<ui:VisualElement name=\"block-class-%d\" class=\"%s\">" % [b, "block" if b == 0 else "block hidden"])
 		for j in POOL_STEP:
 			var i := b * POOL_STEP + j
 			out.append("<ui:VisualElement name=\"row-class-%d\" class=\"row invisible\">" % i)
@@ -387,7 +386,7 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	out.append("<ui:Foldout name=\"prov-section\" text=\"Declarations\" value=\"true\" class=\"section\">")
 	out.append("<ui:Label name=\"prov-title\" class=\"readout\" text=\" \" />")
 	for i in PROV_ROWS:
-		out.append("<ui:Button name=\"prov-%d\" class=\"link prov hidden\" text=\" \" tooltip=\"%s\" />" % [i, _x("Click to show the declaration in the source view.")])
+		out.append("<ui:Button name=\"prov-%d\" class=\"link prov invisible\" text=\" \" tooltip=\"%s\" />" % [i, _x("Click to show the declaration in the source view.")])
 	out.append("<ui:Label name=\"prov-targets\" class=\"readout targets\" text=\" \" />")
 	out.append("</ui:Foldout>")
 	out.append("<ui:Foldout name=\"layout-section\" text=\"Layout\" value=\"true\" class=\"section\">")
@@ -504,14 +503,22 @@ func _apply(v: Dictionary) -> void:
 	_applying = false
 
 
+## The class rows. Block 0 is always displayed and its unused rows are
+## invisible: a display change lays out the whole inspector (about 90 ms on
+## the GDScript path, request R15), and most elements have 0 to 2
+## classes. Without classes, row 0 says so.
 func _class_rows(rows: Array) -> void:
-	_hide("class-none", "hint", not rows.is_empty())
-	var blocks := int(ceil(float(rows.size()) / POOL_STEP))
-	for b in _class_pool / POOL_STEP:
+	var blocks := maxi(1, int(ceil(float(rows.size()) / POOL_STEP)))
+	for b in range(1, _class_pool / POOL_STEP):
 		_hide("block-class-%d" % b, "block", b >= blocks)
 	for i in _class_pool:
 		var used: bool = i < rows.size()
-		_hide("row-class-%d" % i, "row", false, "" if used else "invisible")
+		var none: bool = i == 0 and rows.is_empty()
+		_hide("row-class-%d" % i, "row", false, "" if used or none else "invisible")
+		_hide("remove-class-%d" % i, "remove", false, "" if used else "invisible")
+		if none:
+			_text("class-name-%d" % i, " ")
+			_text("class-rules-%d" % i, "No classes.")
 		if not used:
 			continue
 		var r: Dictionary = rows[i]
@@ -535,7 +542,8 @@ func _provenance_rows(rows: Array, choices: Array) -> void:
 		var used: bool = i < rows.size()
 		var r: Dictionary = rows[i] if used else {}
 		var status := String(r.get("status", ""))
-		_hide("prov-%d" % i, "link prov", not used, "status-" + status if used else "")
+		# Unused rows are invisible, not hidden: no layout per selection.
+		_hide("prov-%d" % i, "link prov", false, "status-" + status if used else "invisible")
 		if used:
 			var t := EdProvenance.line(r, EdProvenance.longhand_of(focused_property))
 			if i == PROV_ROWS - 1 and rows.size() > PROV_ROWS:
