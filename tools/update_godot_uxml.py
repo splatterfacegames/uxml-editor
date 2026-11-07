@@ -8,7 +8,7 @@ clone of the editor runs without a second checkout.
 Usage:
     python tools/update_godot_uxml.py --ref <commit-or-branch> [--source <path-or-url>]
 
---source defaults to https://github.com/jethac/godot-uxml.git. A local
+--source defaults to https://github.com/splatterfacegames/godot-uxml.git. A local
 checkout is read with `git archive`, so the files come from the commit,
 never from the working tree. The script writes godot-uxml.pin with the
 resolved commit.
@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_SOURCE = "https://github.com/jethac/godot-uxml.git"
+DEFAULT_SOURCE = "https://github.com/splatterfacegames/godot-uxml.git"
 ADDON = "addons/godot_uxml"
 CASES = "bench/parity/cases"
 CASES_DEST = REPO / "tests" / "fixtures" / "godot-uxml-parity"

@@ -6,7 +6,7 @@ redistributed in this repository or in its builds.
 ## godot-uxml (Apache-2.0)
 
 `addons/godot_uxml/` is an unmodified copy of
-[jethac/godot-uxml](https://github.com/jethac/godot-uxml) at the commit in
+[splatterfacegames/godot-uxml](https://github.com/splatterfacegames/godot-uxml) at the commit in
 `godot-uxml.pin`. The addon carries its own notices in
 `addons/godot_uxml/THIRD-PARTY-NOTICES.md` and license texts in
 `addons/godot_uxml/licenses/`:

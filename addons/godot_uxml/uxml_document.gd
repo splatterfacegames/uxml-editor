@@ -54,6 +54,18 @@ signal items_added(element_name, indices)
 signal items_removed(element_name, indices)
 signal column_sorting_changed(element_name, descriptions)
 signal item_expanded_changed(element_name, id, expanded)
+## Drag and drop of collection items (see set_drag_and_drop()): a drag of
+## the items `indices` of collection `element_name` started at
+## `global_position` (after Unity canStartDrag / setupDragAndDrop); the
+## pointer moved (`target`: the drop arguments of the collection under the
+## pointer with its `visual_mode`, or {} outside every collection of this
+## document); the drag ended. `result`: "dropped" (a collection took the
+## drop), "rejected" (the collection under the pointer refused it),
+## "outside" (released outside every collection of this document) or
+## "canceled" (Escape, cancel_drag(), a reload, a lost mouse press).
+signal items_drag_started(element_name, indices, global_position)
+signal items_drag_updated(element_name, global_position, target)
+signal items_drag_ended(element_name, global_position, result)
 ## A closeable Tab of a TabView was closed (Unity Tab.closed).
 signal tab_closed(element_name, index)
 ## A reorderable TabView moved a Tab (a drag of its header).
@@ -102,6 +114,14 @@ var diagnostics: Array = []
 
 var _doc: UxmlDocumentModel = null
 var _resolver: UxmlResourceResolver = null
+var _custom_resolver: UxmlResourceResolver = null  # the caller's resolver of the last load
+var _last_text = null                  # UXML text of the last load_source(), null for a file
+var _loader_warnings := 0              # _doc.warnings entries the loader made (see replace_source)
+var _forced: Dictionary = {}           # UxmlElement -> PackedStringArray (set_forced_states)
+var _dnd: Dictionary = {}              # the running collection drag ({} when none)
+var _dnd_overlay: Control = null       # the drop indicator during a drag
+var _last_replace := ""                # "in-place" or "reload": the last replace_source()
+var _inject: Array = []                # elements the next restyle applies as changed (_swap_cascade)
 var _styles: Dictionary = {}
 var _controls: Dictionary = {}      # UxmlElement -> outer Control
 var _natives: Dictionary = {}       # UxmlElement -> interactive native
@@ -180,6 +200,10 @@ var pixel_grid := true
 ## deterministic time for tests and tools. When false (default) they follow
 ## the frame clock (_process delta).
 var transitions_manual := false
+
+## Colour of the drop indicator a collection drag draws (the bar between
+## items, the outline of an item; see set_drag_and_drop()).
+var drag_indicator_color := Color(0.27, 0.55, 1.0)
 # Data binding and the VisualElement base attributes (tabindex,
 # picking-mode, view-data-key, ...): runtime/uxml_binding.gd and
 # runtime/uxml_common_attributes.gd. Kept across loads.
@@ -281,15 +305,19 @@ func _notification(what: int) -> void:
 # ---------------------------------------------------------------------------
 
 ## Parse, resolve, instantiate and lay out `path`. `root` overrides
-## project_root for this load. Returns OK, or ERR_FILE_CANT_OPEN when the
-## document itself could not be read (the diagnostic is in `diagnostics`,
-## the previous tree is gone, nothing stale is left on screen).
-func load_document(path: String, root: String = "") -> int:
+## project_root for this load. `resolver`, when given, reads every file of
+## the load (the document, `<Style src>`, `@import`, templates, images,
+## fonts) and `root` is not used: the project root is the root of the
+## resolver. reload() keeps the resolver. Returns OK, or ERR_FILE_CANT_OPEN
+## when the document itself could not be read (the diagnostic is in
+## `diagnostics`, the previous tree is gone, nothing stale is left on
+## screen).
+func load_document(path: String, root: String = "", resolver: UxmlResourceResolver = null) -> int:
 	if _doc != null:
 		_attrs.capture_view_data()
 	_clear()
-	var effective_root := root if not root.is_empty() else project_root
-	_resolver = UxmlResourceResolver.new(effective_root)
+	var res := _resolver_for(root, resolver)
+	_resolver = res
 	_doc = UxmlLoader.load_file_with_resolver(path, _resolver)
 	if _doc.path.is_empty():
 		# The document file itself did not load: keep the diagnostic, show
@@ -298,14 +326,32 @@ func load_document(path: String, root: String = "") -> int:
 		_doc = null
 		loaded.emit(false)
 		return ERR_FILE_CANT_OPEN
+	_last_text = null
+	_finish_load(false)
+	return OK
 
-	_effective_root = effective_root
+
+## The resolver of a load: the caller's resolver, or a new one for `root`
+## (project_root when empty). Records the choice for reload().
+func _resolver_for(root: String, resolver: UxmlResourceResolver) -> UxmlResourceResolver:
+	_custom_resolver = resolver
+	if resolver != null:
+		_effective_root = resolver.project_root
+		return resolver
+	_effective_root = root if not root.is_empty() else project_root
+	return UxmlResourceResolver.new(_effective_root)
+
+
+## The steps every successful load shares after the model is read.
+func _finish_load(adopt: bool) -> void:
+	_loader_warnings = _doc.warnings.size()
+	if adopt and shared_sheets != null:
+		_adopt_sheets(shared_sheets)
 	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
 	_index()
 	_restyle_now()
 	_attrs.restore_view_data()
 	loaded.emit(true)
-	return OK
 
 
 ## The author stylesheets of `src` that style its whole document (no scope,
@@ -348,23 +394,384 @@ static func _reindex_items(items: Array, base: int) -> Array:
 
 ## Load a document from UXML text instead of a file. `virtual_path` names
 ## the document for diagnostics and for relative references (it need not
-## exist). Used for generated documents such as a dropdown menu.
-func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxml", root: String = "") -> int:
+## exist). Used for generated documents such as a dropdown menu, and for
+## unsaved text in an editor. `resolver`, when given, reads every other
+## file of the load (`<Style src>`, `@import`, templates, images, fonts)
+## and `root` is not used (see load_document). reload() keeps the resolver.
+func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxml", root: String = "",
+		resolver: UxmlResourceResolver = null) -> int:
 	if _doc != null:
 		_attrs.capture_view_data()
 	_clear()
-	var effective_root := root if not root.is_empty() else project_root
-	_resolver = UxmlResourceResolver.new(effective_root)
+	_resolver = _resolver_for(root, resolver)
 	_doc = UxmlLoader.load_source(uxml, virtual_path, _resolver)
-	_effective_root = effective_root
-	if shared_sheets != null:
-		_adopt_sheets(shared_sheets)
-	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
-	_index()
-	_restyle_now()
-	_attrs.restore_view_data()
-	loaded.emit(true)
+	_last_text = uxml
+	_finish_load(true)
 	return OK
+
+
+# ---------------------------------------------------------------------------
+# Partial reload (editors)
+# ---------------------------------------------------------------------------
+
+## Emitted after replace_source(): `in_place` is true when the elements,
+## controls and their state were kept, false after a full load (then
+## `loaded` was emitted too).
+signal source_replaced(in_place)
+
+
+## Parse `text` again as the author stylesheet `origin` of this document
+## and restyle. `origin` is the sheet path as the load resolved it (the
+## `file` of a cascade origin; a path that spells the same file works).
+## The controls, their state (focus, scroll offsets, values) and the
+## element tree stay; the cascade is rebuilt, so running transitions stop
+## at their end values. New `@import`s are loaded. The diagnostics of the
+## sheet and the style diagnostics of the controls are made again. Returns
+## OK, ERR_UNCONFIGURED before a load, or ERR_DOES_NOT_EXIST when no
+## author sheet of the document has that origin (theme sheets cannot be
+## reloaded).
+func reload_stylesheet(origin: String, text: String) -> int:
+	if _doc == null:
+		return ERR_UNCONFIGURED
+	var key := _path_key(origin)
+	var hits: Array = []
+	var origins := {}
+	for sh in _doc.sheets:
+		var o := String(sh["origin"])
+		if bool(sh.get("theme", false)) or o.is_empty():
+			continue
+		if _path_key(o) == key:
+			hits.append(int(sh["index"]))
+			origins[o] = true
+	if hits.is_empty():
+		return ERR_DOES_NOT_EXIST
+	_doc.warnings = _doc.warnings.filter(func(w): return not origins.has(String(w.get("file", ""))))
+	for si in hits:
+		UxmlLoader.reparse_sheet(_doc, si, text, _resolver)
+	if _applier != null:
+		_applier.forget_warnings()
+	_rebuild_cascade()
+	return OK
+
+
+## The comparison form of a path: canonical, and lower case where file
+## names are not case sensitive (Windows, macOS).
+static func _path_key(path: String) -> String:
+	var k := UxmlResourceResolver.collapse_path(path.replace("\\", "/"))
+	if OS.get_name() == "Windows" or OS.get_name() == "macOS":
+		k = k.to_lower()
+	return k
+
+
+## A new cascade for changed rules: every control is applied again and
+## laid out; the element tree and the controls stay.
+func _rebuild_cascade() -> void:
+	_cascade = null
+	_transitions = null
+	_layout_records = {}
+	_layout_xcache = {}
+	_full_apply = true
+	_force_layout = true
+	_scan_all = true
+	_restyle_now()
+
+
+## Replace the document text with `uxml` (the same document path and
+## resolver). When the new text has the same elements in the same tree
+## and differs from the old text only in `class` and `style` attribute
+## values, comments, whitespace or attribute formatting, the change is
+## made in place: every element, control, focus, scroll offset, forced
+## state and running transition stays, element offsets (open_tag_start,
+## open_tag_end, source_end, attribute offsets) move to the new text, and
+## the cascade is computed again. In-place also needs: no templates, no
+## <Bindings>, the same stylesheets, and `class` / `style` values that
+## the runtime has not changed since the load. Otherwise the document is
+## loaded again from `uxml`, and the view state (behavior view data:
+## scroll offsets, selections, tabs, split sizes), the focus and the
+## forced states move to the elements at the same tree position with the
+## same tag. Returns OK or the load error. source_replaced tells which
+## path ran; get_last_replace_mode() too.
+func replace_source(uxml: String) -> int:
+	if _doc == null:
+		return ERR_UNCONFIGURED
+	if _restyle_queued:
+		_restyle_now()
+	var fresh := UxmlLoader.load_source(uxml, _doc.path, _resolver)
+	var plan := _in_place_plan(fresh)
+	if plan.is_empty():
+		_last_replace = "reload"
+		var err := _reload_keeping(uxml)
+		source_replaced.emit(false)
+		return err
+	_apply_in_place(fresh, plan)
+	_last_replace = "in-place"
+	source_replaced.emit(true)
+	return OK
+
+
+## "in-place" or "reload": how the last replace_source() ran ("" before).
+func get_last_replace_mode() -> String:
+	return _last_replace
+
+
+## The in-place edit of `fresh` (a model of the new text) over the
+## current document: {pairs: [[runtime element, new raw element]], edits:
+## [[runtime element, attribute, value or null]]}, or {} when the edit
+## cannot be made in place.
+func _in_place_plan(fresh: UxmlDocumentModel) -> Dictionary:
+	if not _doc.element_paths.is_empty() or not _doc.bindings.is_empty():
+		return {}
+	if not fresh.element_paths.is_empty() or not fresh.bindings.is_empty():
+		return {}
+	if _loader_warnings > _doc.warnings.size():
+		return {}
+	# The same stylesheets: the loader's sheets come first in load order.
+	if fresh.sheets.size() > _doc.sheets.size():
+		return {}
+	for k in fresh.sheets.size():
+		var a: Dictionary = fresh.sheets[k]
+		var b: Dictionary = _doc.sheets[k]
+		if a["origin"] != b["origin"] or a["source"] != b["source"] or bool(b.get("theme", false)):
+			return {}
+	var old_root: UxmlElement = UxmlParser.new().parse(_doc.source, _doc.path)["root"]
+	var by_off := {}
+	for el in _doc.root.walk():
+		if el.part_of == null and not _pooled.has(el):
+			by_off[el.open_tag_start] = el
+	var pairs: Array = []
+	var edits: Array = []
+	var stack: Array = [[old_root, fresh.root]]
+	while not stack.is_empty():
+		var pr: Array = stack.pop_back()
+		var o: UxmlElement = pr[0]
+		var n: UxmlElement = pr[1]
+		if o.tag() != n.tag() or o.children.size() != n.children.size():
+			return {}
+		var rt = by_off.get(o.open_tag_start)
+		if rt != null and (rt as UxmlElement).local != o.local:
+			return {}
+		var oa = _attr_map(o)
+		var na = _attr_map(n)
+		if oa == null or na == null:
+			return {}
+		var names := {}
+		for k in oa:
+			names[k] = true
+		for k in na:
+			names[k] = true
+		for an in names:
+			var ov = oa.get(an)
+			var nv = na.get(an)
+			if ov == nv:
+				continue
+			if (an != "class" and an != "style") or rt == null:
+				return {}
+			# The runtime value must still be the authored one (plus the
+			# classes the control adds), or the edit would undo a runtime
+			# change that a fresh load would not have.
+			var cur = rt.get_attribute(an)
+			var want = nv
+			if an == "class" and not UxmlParts.control_classes(rt).is_empty():
+				if cur == null or String(cur) != UxmlParts.merged_class(rt, "" if ov == null else String(ov)):
+					return {}
+				want = UxmlParts.merged_class(rt, "" if nv == null else String(nv))
+			elif cur != ov:
+				return {}
+			edits.append([rt, an, want])
+		if rt != null:
+			pairs.append([rt, n])
+		for k in o.children.size():
+			stack.append([o.children[k], n.children[k]])
+	return {"pairs": pairs, "edits": edits}
+
+
+## Attribute name -> value, or null when the element has an attribute
+## twice (such an element takes the full load).
+static func _attr_map(el: UxmlElement):
+	var m := {}
+	for a in el.attributes:
+		if m.has(a["name"]):
+			return null
+		m[a["name"]] = a["value"]
+	return m
+
+
+func _apply_in_place(fresh: UxmlDocumentModel, plan: Dictionary) -> void:
+	var src := fresh.source
+	# Old offset -> new offset, for diagnostics made before the edit.
+	var moved := {}
+	for pr in plan["pairs"]:
+		var rt: UxmlElement = pr[0]
+		var n: UxmlElement = pr[1]
+		moved[rt.open_tag_start] = n.open_tag_start
+		var noff := {}
+		for a in n.attributes:
+			if not noff.has(a["name"]):
+				noff[a["name"]] = a["offset"]
+		for a in rt.attributes:
+			var no = noff.get(a["name"])
+			if no != null:
+				moved[int(a["offset"])] = int(no)
+				a["offset"] = no
+		rt.open_tag_start = n.open_tag_start
+		rt.open_tag_end = n.open_tag_end
+		rt.source_end = n.source_end
+	for el in _doc.root.walk():
+		var top: UxmlElement = el
+		while top.part_of != null:
+			top = top.part_of
+		if top != el:
+			el.open_tag_start = top.open_tag_start
+			el.open_tag_end = top.open_tag_end
+			el.source_end = top.source_end
+	_doc.source = src
+	if _applier != null:
+		_applier.set_source(src)
+	# Diagnostics: the loader's again, the later ones moved to the new text.
+	var later: Array = _doc.warnings.slice(_loader_warnings)
+	_doc.warnings = fresh.warnings.duplicate()
+	_loader_warnings = _doc.warnings.size()
+	for w in later:
+		_move_diag(w, moved, src)
+	_doc.warnings.append_array(later)
+	for w in _rt_warnings:
+		_move_diag(w, moved, src)
+	for e in plan["edits"]:
+		var el: UxmlElement = e[0]
+		if e[2] == null:
+			el.remove_attribute(e[1])
+		else:
+			el.set_attribute(e[1], String(e[2]))
+	_swap_cascade()
+
+
+func _move_diag(w: Dictionary, moved: Dictionary, src: String) -> void:
+	if String(w.get("file", "")) != _doc.path:
+		return
+	var no = moved.get(int(w.get("offset", -1)))
+	if no == null:
+		return
+	var lc := UxmlDiagnostic.line_col(src, no)
+	if w.has("end_offset"):
+		w["end_offset"] = int(w["end_offset"]) + int(no) - int(w["offset"])
+	w["offset"] = no
+	w["line"] = lc.x
+	w["column"] = lc.y
+
+
+## A new cascade over the same elements, for diagnostics at the new
+## offsets: the running transitions move to it, and only the controls
+## whose computed style changed are applied again.
+func _swap_cascade() -> void:
+	var old_styles := _styles
+	var nc := UssCascade.new(_doc)
+	if _transitions != null:
+		_transitions._cascade = nc
+		for ti in _transitions._written:
+			nc.set_override(ti, _transitions._written[ti])
+	nc.update(_restyle_options())
+	var changed: Array = []
+	for el in nc.els:
+		var ns: Dictionary = nc.styles[el]
+		var os = old_styles.get(el)
+		if os != null and os == ns and (os as Dictionary).keys() == ns.keys():
+			nc.styles[el] = os
+		elif _controls.has(el):
+			changed.append(el)
+	_cascade = nc
+	_attr_dirty.clear()
+	_scan_all = false
+	_inject = changed
+	_force_layout = true
+	_restyle_now()
+
+
+## Keep view state, focus and forced states across a full load of `uxml`:
+## an element takes the state of the old element with the same `name`
+## (names used once), else of the old element at the same tree position
+## with the same tag.
+func _reload_keeping(uxml: String) -> int:
+	var old_keys := _tree_keys(_doc.source)
+	var views := {}
+	var forced := {}
+	var focus_keys: Array = []
+	var focus_native := false
+	var fo: Control = get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if fo != null and is_ancestor_of(fo):
+		var fel := get_element_for(fo)
+		while fel != null and fel.part_of != null:
+			fel = fel.part_of
+		if fel != null:
+			focus_keys = old_keys.get(fel.open_tag_start, [])
+			focus_native = fo != _controls.get(fel)
+	for el in _doc.root.walk():
+		if el.part_of != null or _pooled.has(el):
+			continue
+		var ks: Array = old_keys.get(el.open_tag_start, [])
+		if ks.is_empty():
+			continue
+		var b = _behaviors.get(el)
+		if b != null and b.has_method("view_state"):
+			var st: Dictionary = b.view_state()
+			if not st.is_empty():
+				views[ks[0]] = st
+		if _forced.has(el):
+			forced[ks[0]] = _forced[el]
+	var path := _doc.path
+	var err := load_source(uxml, path, _effective_root, _custom_resolver)
+	if err != OK or _doc == null:
+		return err
+	var new_keys := _tree_keys(_doc.source)
+	for el in _doc.root.walk():
+		if el.part_of != null or _pooled.has(el):
+			continue
+		var ks: Array = new_keys.get(el.open_tag_start, [])
+		var view = null
+		var f = null
+		var focus := false
+		if not ks.is_empty():
+			view = views.get(ks[0])
+			f = forced.get(ks[0])
+			focus = not focus_keys.is_empty() and focus_keys[0] == ks[0]
+		if view != null:
+			var b = _behaviors.get(el)
+			if b != null and b.has_method("restore_view_state"):
+				b.restore_view_state(view)
+		if f != null:
+			_forced[el] = f
+		if focus:
+			var c: Control = get_native_for(el) if focus_native else get_control_for(el)
+			if c != null and c.is_visible_in_tree() and c.focus_mode != Control.FOCUS_NONE:
+				c.grab_focus()
+	if not _forced.is_empty():
+		_queue_restyle()
+	return OK
+
+
+## Open tag offset -> the identity keys of every element of `source` (raw
+## parse: authored elements only): ["#name"] for a name used once, else
+## [the tree position "tag/index:tag/..."].
+func _tree_keys(source: String) -> Dictionary:
+	var out := {}
+	var root: UxmlElement = UxmlParser.new().parse(source, _doc.path)["root"]
+	var names := {}
+	for el in root.walk():
+		var n = el.get_attribute("name")
+		if n != null:
+			names[String(n)] = int(names.get(String(n), 0)) + 1
+	var stack: Array = [[root, root.tag()]]
+	while not stack.is_empty():
+		var pr: Array = stack.pop_back()
+		var el: UxmlElement = pr[0]
+		var n = el.get_attribute("name")
+		if n != null and names[String(n)] == 1:
+			out[el.open_tag_start] = ["#" + String(n)]
+		else:
+			out[el.open_tag_start] = [pr[1]]
+		for k in el.children.size():
+			var ch: UxmlElement = el.children[k]
+			stack.append([ch, "%s/%d:%s" % [pr[1], k, ch.tag()]])
+	return out
 
 
 ## Alias for load_document when a `load` verb reads better.
@@ -378,18 +785,29 @@ func load(path: String, root: String = "") -> int:
 	return load_document(path, root)
 
 
-## Re-load the last loaded document from disk, keeping the project root
-## that load actually used — an explicit root passed to load_document()
-## survives reload() instead of falling back to the exported default.
+## Re-load the last loaded document, keeping the project root that load
+## actually used — an explicit root passed to load_document() survives
+## reload() instead of falling back to the exported default — and the
+## resolver passed to the load. A document read from a file is read again
+## through that resolver. A document loaded with load_source() is read
+## again through the resolver when the resolver can read its virtual path,
+## and is otherwise loaded again from the same text.
 func reload() -> int:
 	if _doc == null or _doc.path.is_empty():
 		return ERR_UNCONFIGURED
 	var path := _doc.path
 	var root := _effective_root
-	return load_document(path, root)
+	var res := _custom_resolver
+	if _last_text != null:
+		var r := (_resolver as UxmlResourceResolver).resolve_text(path)
+		var text: String = r["text"] if r["ok"] else String(_last_text)
+		return load_source(text, path, root, res)
+	return load_document(path, root, res)
 
 
 func _clear() -> void:
+	if not _dnd.is_empty():
+		cancel_drag()
 	for child in _root_box.get_children():
 		_root_box.remove_child(child)
 		child.queue_free()
@@ -402,6 +820,8 @@ func _clear() -> void:
 	_parents.clear()
 	_states.clear()
 	_disabled_rt.clear()
+	_forced = {}
+	_inject = []
 	_dis = PackedByteArray()
 	_gone = PackedByteArray()
 	_styles = {}
@@ -598,18 +1018,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	_restyle_queued = false
 	if _doc == null:
 		return
-	var element_states := {}
-	for el in _states:
-		var s: Dictionary = _states[el]
-		if not s.is_empty():
-			element_states[el] = s.keys()
-	# The resolver gets the explicit runtime sets and descends them the same
-	# way it descends enabled="false"; enabled_elements carries the
-	# SetEnabled(true) override that cancels the attribute.
-	var runtime_disabled := {}
-	var runtime_enabled := {}
-	for el in _disabled_rt:
-		(runtime_disabled if _disabled_rt[el] else runtime_enabled)[el] = true
+	var options := _restyle_options()
 	if _cascade == null:
 		_cascade = UssCascade.new(_doc)
 		_full_apply = true
@@ -638,11 +1047,6 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		dirty = dl
 	_attr_dirty.clear()
 	_scan_all = false
-	var options := {
-		"element_states": element_states,
-		"disabled_elements": runtime_disabled,
-		"enabled_elements": runtime_enabled,
-	}
 	var changed := _cascade.update(options, false, dirty, only_transitions and dirty != null)
 	var olds: Array = _cascade.last_old
 	if _transitions == null:
@@ -707,6 +1111,13 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			seen[el] = true
 			need_layout = true
 			measure_fresh = true
+		if not _inject.is_empty():
+			# Controls whose style changed under a new cascade (_swap_cascade).
+			for el in _inject:
+				seen[el] = true
+			need_layout = true
+			measure_fresh = true
+			_inject = []
 		for el in seen:
 			if _controls.has(el):
 				applied.append(el)
@@ -765,6 +1176,30 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		_transitions.flush_events(_emit_transition_event)
 
 
+## The cascade inputs of the runtime state: pseudo-states per element and
+## the runtime disabled / enabled overrides.
+func _restyle_options() -> Dictionary:
+	var element_states := {}
+	for el in _states:
+		var s: Dictionary = _states[el]
+		if not s.is_empty():
+			element_states[el] = s.keys()
+	# The resolver gets the explicit runtime sets and descends them the same
+	# way it descends enabled="false"; enabled_elements carries the
+	# SetEnabled(true) override that cancels the attribute.
+	var runtime_disabled := {}
+	var runtime_enabled := {}
+	for el in _disabled_rt:
+		(runtime_disabled if _disabled_rt[el] else runtime_enabled)[el] = true
+	if not _forced.is_empty():
+		_merge_forced(element_states, runtime_disabled, runtime_enabled)
+	return {
+		"element_states": element_states,
+		"disabled_elements": runtime_disabled,
+		"enabled_elements": runtime_enabled,
+	}
+
+
 # ---------------------------------------------------------------------------
 # Transitions
 # ---------------------------------------------------------------------------
@@ -796,6 +1231,53 @@ func advance_transitions(seconds: float) -> void:
 ## True while a USS transition runs.
 func has_running_transitions() -> bool:
 	return _transitions != null and _transitions.active()
+
+
+## Every running transition, also one still in its delay: an Array of
+## {element: UxmlElement, property, from, to, value, start_time, delay,
+## duration, easing, elapsed, progress}. `from`, `to` and `value` (the
+## current value) are USS value text; times are seconds on the transition
+## clock (get_transition_clock()): the transition started at `start_time`,
+## interpolates from `start_time + delay` for `duration`, and `elapsed` is
+## the time since `start_time`. `easing` is the timing function name,
+## `progress` the eased progress. A pending restyle runs first, so a state
+## change of this frame has started its transitions.
+func get_transitions() -> Array:
+	if _doc == null:
+		return []
+	if _restyle_queued:
+		_restyle_now()
+	if _transitions == null:
+		return []
+	var out: Array = _transitions.snapshot()
+	for t in out:
+		t["element"] = _cascade.els[t["index"]]
+		t.erase("index")
+	return out
+
+
+## The transition clock in seconds (advance_transitions() and the frame
+## clock move it).
+func get_transition_clock() -> float:
+	return 0.0 if _transitions == null else _transitions.now_ms / 1000.0
+
+
+## Scrub every running transition to `seconds` after its start (delays
+## count: a seek inside the delay shows the start value) and restyle
+## synchronously. A transition put past its end shows its end value and
+## keeps running: transition_end is emitted when playback (the frame clock
+## or advance_transitions()) passes the end. A seek emits no transition
+## events. Set `transitions_manual` first, or the frame clock moves the
+## transitions on from the seek.
+func seek_transitions(seconds: float) -> void:
+	if _doc == null:
+		return
+	if _restyle_queued:
+		_restyle_now()
+	if _transitions == null or not _transitions.active():
+		return
+	if _transitions.seek(seconds * 1000.0):
+		_restyle_now(not _restyle_queued and _attr_dirty.is_empty())
 
 
 func _emit_transition_event(kind: int, index: int, property: String, elapsed: float) -> void:
@@ -1393,6 +1875,434 @@ func set_element_state(element_name: String, state: String, on: bool) -> void:
 		_set_state(el, state, on)
 
 
+# ---------------------------------------------------------------------------
+# Element handles (tools: editors, inspectors, tests)
+# ---------------------------------------------------------------------------
+# These calls take the UxmlElement itself, so elements without a `name`
+# work too. An element of an earlier load is not an element of this
+# document: the calls then return null, {} or do nothing.
+
+## The model of the last load: the element tree (control parts included),
+## the stylesheets and the loader diagnostics. null before a load. Read
+## the model; change elements only through UxmlElement.set_attribute().
+func get_document_model() -> UxmlDocumentModel:
+	return _doc
+
+
+## The outer control of `element` (as get_element() for a name), or null
+## for an element without a control (a <Style>, the <UXML> root's
+## non-visual children) or of another load.
+func get_control_for(element: UxmlElement) -> Control:
+	var c = _controls.get(element)
+	if c != null and not _parked.is_empty():
+		_expose(element)
+	return c
+
+
+## The interactive native inside the box of `element` (as get_native() for
+## a name), or null.
+func get_native_for(element: UxmlElement) -> Control:
+	if element == null or not _controls.has(element):
+		return null
+	if not _parked.is_empty():
+		_expose(element)
+	var b = _behaviors.get(element)
+	if b != null:
+		return b.native()
+	return _natives.get(element)
+
+
+## The element that `control` draws: the element whose outer control is
+## `control` or the nearest Control above `control`. Any control of the
+## document works (an inner native, a part's control, a wrapper child).
+## The result can be a part element (`part_of` is then its control
+## element). null for a control outside the document.
+func get_element_for(control: Control) -> UxmlElement:
+	var n: Node = control
+	while n != null and n != self:
+		var el = _el_of.get(n)
+		if el != null:
+			return el
+		n = n.get_parent()
+	return null
+
+
+## The parent of `element` in the document tree (control parts included),
+## or null for the root.
+func get_parent_element(element: UxmlElement) -> UxmlElement:
+	return _parents.get(element)
+
+
+## The last computed style of `element` (property -> {value, origin}), as
+## get_computed_style() for a name.
+func get_computed_style_for(element: UxmlElement) -> Dictionary:
+	return _styles.get(element, {})
+
+
+## set_element_state() for an element: drive a pseudo-state by hand. Real
+## input can clear the state again (a mouse_exited clears :hover); use
+## set_forced_states() for a state that stays.
+func set_element_state_for(element: UxmlElement, state: String, on: bool) -> void:
+	if element != null and _parents.has(element):
+		_set_state(element, state, on)
+
+
+## The deepest element drawn at `point` (in this control's local
+## coordinates), or null when only the document root is there. The test
+## follows what is drawn: translate, rotate, scale and transform-origin
+## move the hit area with the element; an element outside the clip rect
+## of an overflow: hidden ancestor (its padding or content box) is not
+## hit; elements with display: none or visibility: hidden and their
+## subtrees are not hit; later siblings are above earlier ones. With
+## `respect_picking`, an element with picking-mode="Ignore" (or
+## pickingMode set by a binding) is not hit itself, but its children are,
+## as in Unity. Without `include_parts`, a hit on a control part gives the
+## control element that owns the part (the authored element). A pending
+## restyle and layout run first.
+func element_at(point: Vector2, respect_picking: bool = false, include_parts: bool = false) -> UxmlElement:
+	if _doc == null:
+		return null
+	if _restyle_queued:
+		_restyle_now()
+	var gp := get_global_transform() * point
+	var hit := _pick(_doc.root, gp, respect_picking)
+	if hit == null or hit == _doc.root:
+		return null
+	if not include_parts:
+		while hit.part_of != null:
+			hit = hit.part_of
+	return hit
+
+
+func _pick(el: UxmlElement, gp: Vector2, respect_picking: bool) -> UxmlElement:
+	var c: Control = _controls.get(el)
+	if c == null or not c.is_visible_in_tree():
+		return null
+	var local := c.get_global_transform().affine_inverse() * gp
+	var inside := Rect2(Vector2.ZERO, c.size).has_point(local)
+	var into := inside or not c.clip_contents
+	if into and c.has_meta(&"uxml_clip"):
+		var clip: UxmlClip = c.get_meta(&"uxml_clip")
+		var ins: Vector4 = clip.inset
+		into = Rect2(ins.x, ins.y, c.size.x - ins.x - ins.z, c.size.y - ins.y - ins.w).has_point(local)
+	if into:
+		var k := el.children.size() - 1
+		while k >= 0:
+			var h := _pick(el.children[k], gp, respect_picking)
+			if h != null:
+				return h
+			k -= 1
+	if not inside:
+		return null
+	if respect_picking and _picking_ignored(el, c):
+		return null
+	return el
+
+
+static func _picking_ignored(el: UxmlElement, c: Control) -> bool:
+	if c.has_meta(&"uxml_mouse_authored"):
+		return int(c.get_meta(&"uxml_mouse", Control.MOUSE_FILTER_STOP)) == Control.MOUSE_FILTER_IGNORE
+	var v = el.get_attribute("picking-mode")
+	return v != null and String(v).strip_edges() == "Ignore"
+
+
+# ---------------------------------------------------------------------------
+# Element geometry in another element's space
+# ---------------------------------------------------------------------------
+
+## The transform from the local coordinates of `element` (origin at the
+## top-left corner of its border box, as Unity's local space) to the
+## coordinates of `space` (null: this control's local coordinates, the
+## coordinates of element_at()). USS transforms (translate, rotate, scale,
+## transform-origin) of both elements and of their ancestors apply. The
+## inverse maps the other way: Unity LocalToWorld / WorldToLocal /
+## ChangeCoordinatesTo are `t * p` and `t.affine_inverse() * p`. Returns
+## Transform2D() with a zero basis when an element has no layout (no
+## control, display: none on itself or an ancestor) or is of another load.
+## A pending restyle and layout run first.
+func get_element_transform(element: UxmlElement, space: UxmlElement = null) -> Transform2D:
+	var none := Transform2D(Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+	if _doc == null or not is_inside_tree():
+		return none
+	if _restyle_queued:
+		_restyle_now()
+	var c := _laid_out_control(element)
+	if c == null:
+		return none
+	var to := get_global_transform()
+	if space != null:
+		var sc := _laid_out_control(space)
+		if sc == null:
+			return none
+		to = sc.get_global_transform()
+	return to.affine_inverse() * c.get_global_transform()
+
+
+## The rectangle of a box of `element` in the coordinates of `space` (null:
+## this control's local coordinates), Unity's ChangeCoordinatesTo of the
+## element's box. `box`: "border" (the border box, Unity's layout size),
+## "padding" (inside the borders) or "content" (inside the borders and
+## the padding, Unity's contentRect), all as the last layout resolved
+## them. With a rotation or skew between the two spaces the result is the
+## bounding box of the transformed rectangle. Returns Rect2() when an
+## element has no layout (see get_element_transform()) or for an unknown
+## `box`.
+func get_element_rect(element: UxmlElement, space: UxmlElement = null, box: String = "border") -> Rect2:
+	var t := get_element_transform(element, space)
+	if t.x == Vector2.ZERO and t.y == Vector2.ZERO:
+		return Rect2()
+	var c: Control = _controls[element]
+	var r := Rect2(Vector2.ZERO, c.size)
+	match box:
+		"border":
+			pass
+		"padding":
+			var b := _border_widths(element)
+			r = Rect2(Vector2(b[0], b[1]), Vector2(maxf(0.0, r.size.x - b[0] - b[2]), maxf(0.0, r.size.y - b[1] - b[3])))
+		"content":
+			var ins := _layout_insets(element)
+			var s: Vector2 = ins[0]
+			var e: Vector2 = ins[1]
+			r = Rect2(s, Vector2(maxf(0.0, r.size.x - s.x - e.x), maxf(0.0, r.size.y - s.y - e.y)))
+		_:
+			return Rect2()
+	return xform_rect(t, r)
+
+
+## The bounding box of `r` transformed by `t`.
+static func xform_rect(t: Transform2D, r: Rect2) -> Rect2:
+	if t.x.y == 0.0 and t.y.x == 0.0:
+		var p := t * r.position
+		var q := t * r.end
+		return Rect2(p.min(q), (q - p).abs())
+	var out := Rect2(t * r.position, Vector2.ZERO)
+	out = out.expand(t * Vector2(r.end.x, r.position.y))
+	out = out.expand(t * Vector2(r.position.x, r.end.y))
+	return out.expand(t * r.end)
+
+
+## The control of `element` when the element has a layout: a control of
+## this load, inside the tree, not display: none on itself or above.
+func _laid_out_control(element: UxmlElement) -> Control:
+	if element == null:
+		return null
+	var c = _controls.get(element)
+	if c == null:
+		return null
+	if _cascade != null:
+		var i = _cascade.index.get(element)
+		if i != null and int(i) < _gone.size() and _gone[int(i)] == 1:
+			return null
+	if not _parked.is_empty():
+		_expose(element)
+	return c if (c as Control).is_inside_tree() else null
+
+
+## Resolved border widths [left, top, right, bottom] of `element`, as the
+## layout reads them (px only; on the pixel grid when pixel_grid is on).
+func _border_widths(element: UxmlElement) -> PackedFloat64Array:
+	var st: Dictionary = _styles.get(element, {})
+	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+	var k := 0
+	for p in ["border-left-width", "border-top-width", "border-right-width", "border-bottom-width"]:
+		var e = st.get(p)
+		if e != null:
+			var l := UssValues.parse_length(String(e["value"]))
+			if l["kind"] == "px":
+				var v := float(l["value"])
+				out[k] = UxmlFlexLayout.grid_box(v, true) if pixel_grid else maxf(0.0, v)
+		k += 1
+	return out
+
+
+## The content-box insets [start, end] (border + padding) of the last
+## layout of `element`.
+func _layout_insets(element: UxmlElement) -> Array:
+	if _native_layout():
+		var i = _cascade.index.get(element)
+		if i != null:
+			var r: Array = _cascade._native.call("insets_of", int(i))
+			if r.size() == 2:
+				return r
+		return [Vector2.ZERO, Vector2.ZERO]
+	var ins = _insets.get(element)
+	return ins if ins != null else [Vector2.ZERO, Vector2.ZERO]
+
+
+# ---------------------------------------------------------------------------
+# Forced pseudo-states (state preview)
+# ---------------------------------------------------------------------------
+
+## Pseudo-states set_forced_states() accepts. `:inactive` follows
+## `:active`; `:selected` is the old name of `:checked`.
+const FORCEABLE_STATES := ["hover", "active", "focus", "checked", "selected", "disabled", "enabled"]
+
+
+## Keep `states` on `element` until cleared, whatever the input does: a
+## real mouse_exited does not clear a forced :hover. The states replace
+## the forced states of the element; an empty Array removes them. The
+## cascade, the controls and USS transitions react as for a real state
+## change. "disabled" disables the element and its subtree as
+## set_enabled(false) does (without the `unity-disabled` class); "enabled"
+## cancels an authored enabled="false" as set_enabled(true) does. Unknown
+## states are ignored with a push_warning().
+func set_forced_states(element: UxmlElement, states: PackedStringArray) -> void:
+	if element == null or not (_parents.has(element) or (_doc != null and element == _doc.root)):
+		return
+	var kept := PackedStringArray()
+	for s in states:
+		if not FORCEABLE_STATES.has(s):
+			push_warning("UxmlDocument.set_forced_states: unknown state \"%s\"" % s)
+			continue
+		if not kept.has(s):
+			kept.append(s)
+	var prev = _forced.get(element)
+	if kept.is_empty():
+		if prev == null:
+			return
+		_forced.erase(element)
+	else:
+		if prev != null and prev == kept:
+			return
+		_forced[element] = kept
+	_queue_restyle()
+
+
+## The forced states of `element` (empty when none).
+func get_forced_states(element: UxmlElement) -> PackedStringArray:
+	var s = _forced.get(element)
+	return PackedStringArray() if s == null else (s as PackedStringArray).duplicate()
+
+
+## Remove every forced state of the document.
+func clear_forced_states() -> void:
+	if _forced.is_empty():
+		return
+	_forced = {}
+	_queue_restyle()
+
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+## Every declaration of the longhand `property` that applies to `element`,
+## winner first. Each entry is a Dictionary:
+##
+##   value       the longhand value the declaration gives (var() substituted,
+##               a shorthand expanded; the winner of `font-size: 50%` gives
+##               the px value)
+##   property    the declared property: "margin" for a margin-top that comes
+##               from a `margin` shorthand, "all" for `all: initial`
+##   declared    the declaration value as written
+##   winner      true for the one entry that gives the computed value
+##   status      "winner"; "overridden" (a later or more specific
+##               declaration wins); "dropped" (a var() that does not
+##               resolve: the declaration does not apply); "keyword" (the
+##               declaration won with `initial` or `unset`: the value comes
+##               from the entry after it); "inherited"; "default"
+##   rank        "theme" (the default theme sheets), "author", "inline" (the
+##               style attribute), "inherited", "default"
+##   specificity Vector3i(names, classes and pseudo-classes, types) of the
+##               selector that matched; zero for the other ranks
+##   order       position in cascade order (later wins a tie of rank and
+##               specificity); -1 for "inherited" and "default"
+##   origin      {kind: "rule", sheet, item, decl_index, file[, states]}: item
+##               `item` of sheet `sheet` (UxmlDocumentModel.sheets), its
+##               declaration `decl_index`; `states` lists the pseudo-classes
+##               the selector needs.
+##               {kind: "inline", decl_index}: declaration `decl_index` of
+##               the element's style attribute.
+##               {kind: "inherited", from: UxmlElement, origin}: the value of
+##               the parent `from`, with the origin it has there.
+##               {kind: "default"}: no declaration; the property's initial
+##               value (`value` is null when the initial value comes from
+##               the Godot theme).
+##
+## The ranks order the cascade: an `all: initial` declaration first, then
+## inline, author and theme declarations; specificity, then order, decide
+## inside a rank. The entries after the winner are the declarations the
+## winner overrides; a "keyword" or "dropped" winner is followed by the
+## entry that gives the value. The origin of the winner is the origin in
+## get_computed_style_for() (a running transition writes its current value
+## there, with the origin of its end value).
+##
+## `states` changes pseudo-states of `element` for this query only:
+## {"hover": true, "active": false}. Custom properties (--name) can be
+## queried too. A pending restyle runs first.
+func explain_style(element: UxmlElement, property: String, states: Dictionary = {}) -> Array:
+	if _doc == null or element == null:
+		return []
+	if _restyle_queued:
+		_restyle_now()
+	if _cascade == null:
+		return []
+	var i = _cascade.index.get(element)
+	if i == null:
+		return []
+	var own := -1
+	if not states.is_empty():
+		own = _state_bits(element, i)
+		for s in states:
+			var bit := int(UssCascade.STATE_BITS.get(String(s), 0))
+			if s == "disabled" or s == "enabled":
+				var dis: bool = bool(states[s]) == (s == "disabled")
+				own &= ~(UssCascade.BIT_DISABLED | UssCascade.BIT_ENABLED)
+				own |= UssCascade.BIT_DISABLED if dis else UssCascade.BIT_ENABLED
+			elif bit != 0:
+				own = (own | bit) if bool(states[s]) else (own & ~bit)
+		own &= ~UssCascade.BIT_INACTIVE
+		if (own & UssCascade.BIT_ACTIVE) == 0:
+			own |= UssCascade.BIT_INACTIVE
+	var idx: int = i
+	var bits_of := func(j: int) -> int:
+		return own if j == idx and own >= 0 else _state_bits(_cascade.els[j], j)
+	var p = _parents.get(element)
+	var parent_style: Dictionary = {} if p == null else _styles.get(p, {})
+	return _cascade.explain(idx, property, bits_of, parent_style)
+
+
+## The pseudo-state bits the last restyle gave preorder index `i`.
+func _state_bits(el: UxmlElement, i: int) -> int:
+	var b := 0
+	var s = _states.get(el)
+	if s != null:
+		for st in s:
+			b |= int(UssCascade.STATE_BITS.get(st, 0))
+	var f = _forced.get(el)
+	if f != null:
+		for st in (f as PackedStringArray):
+			if st != "disabled" and st != "enabled":
+				b |= int(UssCascade.STATE_BITS.get(st, 0))
+	var disabled := i < _dis.size() and _dis[i] == 1
+	b |= UssCascade.BIT_DISABLED if disabled else UssCascade.BIT_ENABLED
+	if (b & UssCascade.BIT_ACTIVE) == 0:
+		b |= UssCascade.BIT_INACTIVE
+	return b
+
+
+## Merge the forced states into the restyle inputs (only called when some
+## element has forced states, so a document without them pays nothing).
+func _merge_forced(element_states: Dictionary, runtime_disabled: Dictionary, runtime_enabled: Dictionary) -> void:
+	for el in _forced:
+		var list: Array = element_states.get(el, [])
+		var changed := false
+		for s in (_forced[el] as PackedStringArray):
+			if s == "disabled":
+				runtime_disabled[el] = true
+				runtime_enabled.erase(el)
+			elif s == "enabled":
+				if not runtime_disabled.has(el):
+					runtime_enabled[el] = true
+			elif not list.has(s):
+				if not changed:
+					list = list.duplicate()
+					changed = true
+				list.append(s)
+		if changed:
+			element_states[el] = list
+
+
 ## Set a Label's or Button's text. Rich text tags are parsed for a Label
 ## that was created with rich text (a RichTextLabel); setting `text` on that
 ## control directly would bypass the Unity tags. Re-lays out.
@@ -1537,6 +2447,7 @@ func _load_template(el: UxmlElement, src: String) -> Array:
 		d["offset"] = el.open_tag_start
 		d["line"] = lc.x
 		d["column"] = lc.y
+		d["end_offset"] = el.open_tag_end
 		_rt_warnings.append(d)
 		return []
 	var parsed := UxmlParser.new().parse(res["text"], res["path"])
@@ -1649,6 +2560,302 @@ func scroll_to_item(list_name: String, index: int) -> void:
 	var b = _behavior_of(list_name, "scroll_to_item")
 	if b != null:
 		b.scroll_to_item(index)
+
+
+# ---------------------------------------------------------------------------
+# Drag and drop of collection items
+# ---------------------------------------------------------------------------
+
+## Unity DragVisualMode: what a drop at the pointer would do.
+enum DragVisualMode { NONE, COPY, MOVE, REJECTED }
+## Unity DragAndDropPosition: where a drop at the pointer goes.
+enum DragPosition { OVER_ITEM, BETWEEN_ITEMS, OUTSIDE_ITEMS }
+
+const DRAG_CALLBACKS := ["can_start_drag", "setup_drag_and_drop", "drag_and_drop_update", "handle_drop"]
+
+
+## The drag-and-drop callbacks of collection `list_name` (ListView,
+## TreeView, MultiColumnListView, MultiColumnTreeView), Unity's
+## canStartDrag, setupDragAndDrop, dragAndDropUpdate and handleDrop. Keys
+## of `callbacks` (each optional; the call replaces every earlier one):
+##
+##   can_start_drag(args) -> bool: may a drag start? args {element_name,
+##     element, index, id, indices, ids} (`indices`: the items the drag
+##     takes: the selection when the pressed item is selected, else the
+##     pressed item; `id`, `ids`: tree item ids, list indices). Without it
+##     a drag starts when the view is `reorderable`.
+##   setup_drag_and_drop(args) -> Dictionary: the same args plus
+##     {title: "", data: null}; return {title, data} for the drag.
+##   drag_and_drop_update(args) -> DragVisualMode: on every pointer move
+##     over this view during a drag from any collection of this document.
+##   handle_drop(args) -> DragVisualMode: the drop on this view, when the
+##     last update gave COPY or MOVE. COPY or MOVE accepts the drop.
+##
+## The update and drop args: {element_name, element (this view),
+## position (global), index (the item under the pointer, -1 none),
+## insert_at_index, drop_position (DragPosition), parent_id (tree: the
+## drop parent, null for the roots), child_index (tree: the index among
+## its children, -1 for the end), source, source_element, indices, ids
+## (the dragged items of the source), title, data}. The 5-pixel edge bands
+## of an item drop between items, the rest over the item.
+##
+## Without update and drop callbacks a `reorderable` view moves its own
+## items (Unity's default controllers): a list between items
+## (item_index_changed per move), a tree also into an item
+## (item_index_changed(element_name, id, parent_id) per move; the roots and
+## children Arrays of set_tree_source change in place). The drag starts
+## after 5 pixels, a press on a multiple selection keeps the selection
+## until the release, Escape cancels, the viewport scrolls in its 5-pixel
+## edge bands, and a COPY or MOVE update draws a bar between items or an
+## outline over an item (drag_indicator_color) and gives the item row the
+## class unity-collection-view__item--drag-hover. Set the callbacks after
+## each load, as set_list_source. Returns OK, ERR_DOES_NOT_EXIST (no such
+## collection) or ERR_INVALID_PARAMETER (an unknown key or a value that is
+## not a Callable).
+func set_drag_and_drop(list_name: String, callbacks: Dictionary) -> int:
+	var b = _behavior_of(list_name, "set_drag_callbacks")
+	if b == null:
+		return ERR_DOES_NOT_EXIST
+	for k in callbacks:
+		if not DRAG_CALLBACKS.has(k) or not callbacks[k] is Callable:
+			return ERR_INVALID_PARAMETER
+	b.set_drag_callbacks(callbacks)
+	return OK
+
+
+## The item whose row is drawn at `global_point` in collection
+## `list_name` (inside its viewport; transforms apply), or -1.
+func get_item_index_at(list_name: String, global_point: Vector2) -> int:
+	var b = _behavior_of(list_name, "row_at")
+	if b == null:
+		return -1
+	var row = b.row_at(global_point)
+	return -1 if row == null else row.index
+
+
+## The global rectangle (bounding box) of the row of item `index` in
+## collection `list_name`, or Rect2() when no drawn row shows the item.
+func get_item_rect(list_name: String, index: int) -> Rect2:
+	var b = _behavior_of(list_name, "item_rect")
+	return Rect2() if b == null else b.item_rect(index)
+
+
+## The running drag of this document: {element_name, element, indices,
+## ids, title, data, position (global), target (as items_drag_updated)},
+## or {} when no drag runs.
+func get_drag() -> Dictionary:
+	if _dnd.is_empty():
+		return {}
+	return {"element_name": _dnd["element_name"], "element": _dnd["element"], "indices": _dnd["indices"].duplicate(),
+		"ids": _dnd["ids"].duplicate(), "title": _dnd["title"], "data": _dnd["data"],
+		"position": _dnd["position"], "target": _dnd["target"].duplicate()}
+
+
+## End the running drag without a drop (items_drag_ended "canceled").
+func cancel_drag() -> void:
+	if _dnd.is_empty():
+		return
+	var src = _dnd["source"]
+	var at: Vector2 = _dnd["position"]
+	var nm: String = _dnd["element_name"]
+	_dnd_clear()
+	src.drag_reset()
+	items_drag_ended.emit(nm, at, "canceled")
+
+
+## A drag from item `index` of collection behavior `src` at `gp`: Unity
+## canStartDrag, then setupDragAndDrop. Returns false when it did not start.
+func _dnd_begin(src, index: int, gp: Vector2) -> bool:
+	if not _dnd.is_empty():
+		return false
+	var indices: Array = src.drag_indices(index)
+	var ids: Array = []
+	for i in indices:
+		ids.append(src.item_id(i))
+	var args := {"element_name": src.element_name(), "element": src.el, "index": index, "id": src.item_id(index),
+		"indices": indices.duplicate(), "ids": ids.duplicate()}
+	if not src.can_start_drag(args):
+		return false
+	var setup := args.duplicate()
+	setup["title"] = ""
+	setup["data"] = null
+	var cb: Callable = src.drag_callback("setup_drag_and_drop")
+	if cb.is_valid():
+		var r = cb.call(setup.duplicate())
+		if r is Dictionary:
+			for k in ["title", "data"]:
+				if (r as Dictionary).has(k):
+					setup[k] = r[k]
+	var row = src.row_of(index)
+	var c: Control = _controls.get(row.element) if row != null else null
+	_dnd ={"source": src, "element_name": args["element_name"], "element": src.el, "indices": indices, "ids": ids,
+		"title": str(setup["title"]), "data": setup["data"], "position": gp, "target": {}, "target_b": null,
+		"hover": null, "cursor": [c, c.mouse_default_cursor_shape] if c != null else []}
+	items_drag_started.emit(args["element_name"], indices.duplicate(), gp)
+	if not _dnd.is_empty():
+		_dnd_update(gp)
+	return not _dnd.is_empty()
+
+
+## The pointer of the running drag moved to `gp`: the collection under it
+## computes the drop and its visual mode (Unity dragAndDropUpdate).
+func _dnd_update(gp: Vector2) -> void:
+	if _dnd.is_empty():
+		return
+	_dnd["position"] = gp
+	var tb = _collection_at(gp)
+	var target := {}
+	if tb != null:
+		target = tb.drop_args(gp)
+		target["source"] = _dnd["element_name"]
+		target["source_element"] = _dnd["element"]
+		target["indices"] = _dnd["indices"].duplicate()
+		target["ids"] = _dnd["ids"].duplicate()
+		target["title"] = _dnd["title"]
+		target["data"] = _dnd["data"]
+		target["visual_mode"] = tb.drag_update(target.duplicate())
+		if _dnd.is_empty():
+			return  # the callback canceled the drag
+	_dnd["target"] = target
+	_dnd["target_b"] = tb
+	_dnd_indicate(tb, target)
+	var cur: Array = _dnd["cursor"]
+	if not cur.is_empty() and is_instance_valid(cur[0]):
+		var shape := Control.CURSOR_DRAG
+		match int(target.get("visual_mode", DragVisualMode.MOVE)):
+			DragVisualMode.COPY:
+				shape = Control.CURSOR_CAN_DROP
+			DragVisualMode.NONE, DragVisualMode.REJECTED:
+				shape = Control.CURSOR_FORBIDDEN
+		(cur[0] as Control).mouse_default_cursor_shape = shape
+	items_drag_updated.emit(_dnd["element_name"], gp, target.duplicate())
+	if tb != null and not _dnd.is_empty():
+		tb.auto_scroll(gp)
+
+
+## The release of the running drag of `src` at `gp`: the collection under
+## the pointer takes the drop when its last update gave COPY or MOVE
+## (Unity handleDrop).
+func _dnd_finish(src, gp: Vector2, canceled: bool) -> void:
+	if _dnd.is_empty() or _dnd["source"] != src:
+		return
+	if canceled:
+		cancel_drag()
+		return
+	_dnd_update(gp)
+	if _dnd.is_empty():
+		return
+	var nm: String = _dnd["element_name"]
+	var target: Dictionary = _dnd["target"]
+	var tb = _dnd["target_b"]
+	_dnd_clear()
+	var result := "outside"
+	if tb != null:
+		result = "rejected"
+		var mode := int(target["visual_mode"])
+		if mode == DragVisualMode.COPY or mode == DragVisualMode.MOVE:
+			var args := target.duplicate()
+			args.erase("visual_mode")
+			var r: int = tb.drop(args)
+			if r == DragVisualMode.COPY or r == DragVisualMode.MOVE:
+				result = "dropped"
+	items_drag_ended.emit(nm, gp, result)
+
+
+## Remove the drag state and its indicator.
+func _dnd_clear() -> void:
+	if _dnd.is_empty():
+		return
+	var hover = _dnd["hover"]
+	if hover != null:
+		UxmlParts.toggle_control_class(hover, "unity-collection-view__item--drag-hover", false)
+	var cur: Array = _dnd["cursor"]
+	if not cur.is_empty() and is_instance_valid(cur[0]):
+		(cur[0] as Control).mouse_default_cursor_shape = cur[1]
+	_dnd = {}
+	if _dnd_overlay != null:
+		_dnd_overlay.queue_free()
+		_dnd_overlay = null
+
+
+## The collection behavior under the global point `gp`, or null.
+func _collection_at(gp: Vector2):
+	var hit := element_at(get_global_transform().affine_inverse() * gp, false, true)
+	while hit != null:
+		if _lists.has(hit):
+			var b = _behaviors.get(hit)
+			if b != null and b.has_method("drop_args"):
+				return b
+		hit = _parents.get(hit)
+	return null
+
+
+## Draw the drop indicator of `target` on collection behavior `tb`: the
+## row class and an outline over an item, a bar between items.
+func _dnd_indicate(tb, target: Dictionary) -> void:
+	var mode := int(target.get("visual_mode", DragVisualMode.NONE))
+	var shown := tb != null and (mode == DragVisualMode.COPY or mode == DragVisualMode.MOVE)
+	var row = tb.row_of(int(target["index"])) if shown else null
+	var over: bool = shown and row != null and target["drop_position"] == DragPosition.OVER_ITEM
+	var hover = row.element if over else null
+	if hover != _dnd["hover"]:
+		if _dnd["hover"] != null:
+			UxmlParts.toggle_control_class(_dnd["hover"], "unity-collection-view__item--drag-hover", false)
+		if hover != null:
+			UxmlParts.toggle_control_class(hover, "unity-collection-view__item--drag-hover", true)
+		_dnd["hover"] = hover
+	var line := Rect2()
+	var box := Rect2()
+	if over:
+		box = tb.item_rect(int(target["index"]))
+	elif shown:
+		var k := int(target["insert_at_index"])
+		var r: Rect2 = tb.item_rect(k)
+		if r.has_area():
+			line = Rect2(r.position, Vector2(r.size.x, 0.0))
+		else:
+			r = tb.item_rect(k - 1)
+			if r.has_area():
+				line = Rect2(Vector2(r.position.x, r.end.y), Vector2(r.size.x, 0.0))
+	if not box.has_area() and line.size.x <= 0.0:
+		if _dnd_overlay != null:
+			_dnd_overlay.visible = false
+		return
+	if _dnd_overlay == null:
+		_dnd_overlay = Control.new()
+		_dnd_overlay.name = "UxmlDropIndicator"
+		_dnd_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dnd_overlay.clip_contents = true
+		var bar := ColorRect.new()
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dnd_overlay.add_child(bar)
+		var outline := ReferenceRect.new()
+		outline.editor_only = false
+		outline.border_width = 1.0
+		outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dnd_overlay.add_child(outline)
+		add_child(_dnd_overlay, false, Node.INTERNAL_MODE_BACK)
+	var inv := get_global_transform().affine_inverse()
+	var vp: Control = tb.viewport_control()
+	var clip := xform_rect(inv * vp.get_global_transform(), Rect2(Vector2.ZERO, vp.size)) if vp != null \
+		else Rect2(Vector2.ZERO, size)
+	_dnd_overlay.visible = true
+	_dnd_overlay.position = clip.position
+	_dnd_overlay.size = clip.size
+	var bar_c := _dnd_overlay.get_child(0) as ColorRect
+	var out_c := _dnd_overlay.get_child(1) as ReferenceRect
+	bar_c.visible = not over
+	out_c.visible = over
+	if over:
+		var b := xform_rect(inv, box)
+		out_c.position = b.position - clip.position
+		out_c.size = b.size
+		out_c.border_color = drag_indicator_color
+	else:
+		var l := xform_rect(inv, line)
+		bar_c.position = Vector2(l.position.x, l.position.y - 1.0) - clip.position
+		bar_c.size = Vector2(l.size.x, 2.0)
+		bar_c.color = drag_indicator_color
 
 
 ## Multi-column views: `bind.call(cell: Control, index)` fills the cell of

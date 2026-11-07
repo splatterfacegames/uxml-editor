@@ -2,7 +2,7 @@
 
 UXML Editor is a visual editor for Unity UI Toolkit documents (UXML) and
 stylesheets (USS). The editor is a Godot 4.7 application.
-[godot-uxml](https://github.com/jethac/godot-uxml) renders the documents.
+[godot-uxml](https://github.com/splatterfacegames/godot-uxml) renders the documents.
 
 > The `godot` branch holds the Godot rebuild. The `main` branch holds the
 > previous React and Tauri editor.
