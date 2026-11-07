@@ -1,5 +1,7 @@
 # UXML Editor
 
+[Splatterface Games](https://www.splatterfacegames.com/) · [Repository](https://github.com/splatterfacegames/uxml-editor) · [Apache License 2.0](LICENSE)
+
 Standalone visual editor for Unity UI Toolkit UXML and USS. The editor core is
 browser-first; Tauri 2 provides a thin Windows desktop host for native
 filesystem operations.
