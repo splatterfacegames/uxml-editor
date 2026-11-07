@@ -961,6 +961,7 @@ func _on_reload_timer() -> void:
 
 func _render() -> void:
 	_render_queued = false
+	var waited := not reload_timer.is_stopped()
 	reload_timer.stop()
 	var had_preview := timeline.before_render()
 	var runs := canvas.host.renders + canvas.host.patches
@@ -970,8 +971,8 @@ func _render() -> void:
 		return
 	if _render_patch and canvas.host.update(state.workspace, state.session.entry_path):
 		# An undo in the pause after a bar edit: the render has the text
-		# already, and the run shows the preview no more.
-		if had_preview and canvas.host.renders + canvas.host.patches == runs:
+		# already, and the tracks show the edit no more.
+		if (waited or had_preview) and canvas.host.renders + canvas.host.patches == runs:
 			timeline.rendered()
 		return
 	canvas.host.render(state.workspace, state.session.entry_path, state.store.root)

@@ -581,6 +581,12 @@ that keep a frame cheap:
   deepest element first.
 - A seek restyles only the running transitions and redraws the track area
   and the canvas overlay. The time label has a fixed width.
+- A change of the number of rows of the inspector moves content with a
+  paint-only `translate`, and a text goes through `set_text` to a label of a
+  size that does not follow the text. A selection lays out nothing.
+- A timeline bar drag writes once, and its stylesheet reload waits for a pause.
+- The state-machine graph builds on a frame without a change, and only while
+  the panel is open.
 
 ## Testing
 

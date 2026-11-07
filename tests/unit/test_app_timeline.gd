@@ -644,6 +644,37 @@ func test_an_undo_in_the_pause_after_a_bar_drag() -> void:
 	ok(style == null or not String(style).contains("transition-delay"), "no preview: " + str(style))
 
 
+func test_a_bar_drag_without_a_run_waits_too() -> void:
+	var m := await _open()
+	await _select(m, "quit-button")
+	await frames()
+	var src := m.state.workspace.text(MENU_USS)
+	var prop := "transition-delay"
+	m.inspector.remember_choice(prop, m.inspector.gesture_target(prop)["choice"]["id"])
+	ok(not m.timeline.player.armed, "no run")
+	var w := _track(m, "min-width")
+	var p := _bar_point(m, w)
+	var pps: float = m.timeline._pps
+	var renders: int = m.canvas.host.renders + m.canvas.host.patches
+	await drag(m, p, p + Vector2(pps * 0.2, 0), 3)
+	ok(m.state.workspace.text(MENU_USS).contains("transition-delay: 0s, 0.4s;"), m.state.workspace.text(MENU_USS))
+	eq(m.canvas.host.renders + m.canvas.host.patches, renders, "the reload waits")
+	eq(m.timeline.model.tracks[_track(m, "min-width")]["delay"], 0.4, "the bar shows the value")
+	# Undo in the pause: the render already has the text; the bar goes back.
+	m.state.undo()
+	await frames(3)
+	eq(m.state.workspace.text(MENU_USS), src)
+	eq(m.timeline.model.tracks[_track(m, "min-width")]["delay"], 0.2, "the source again")
+	# A second drag reads the list of the first: press renders first.
+	p = _bar_point(m, _track(m, "min-width"))
+	await drag(m, p, p + Vector2(pps * 0.2, 0), 3)
+	var bg := _track(m, "background-color")
+	p = _bar_point(m, bg)
+	await drag(m, p, p + Vector2(pps * 0.1, 0), 3)
+	ok(m.state.workspace.text(MENU_USS).contains("transition-delay: 0.1s, 0.4s;"), "both edits stay: " + m.state.workspace.text(MENU_USS))
+	eq(m.state.workspace.history.undo_depth(), 2, "one step per gesture")
+
+
 func test_a_selection_change_in_the_pause_renders_first() -> void:
 	var m := await _open()
 	var n := await _select(m, "quit-button")

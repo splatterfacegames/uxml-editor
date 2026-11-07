@@ -832,7 +832,7 @@ func _finish_bar() -> void:
 		_end_preview()
 		return
 	var ask: bool = d["ask"]
-	if player.armed and not ask:
+	if not ask:
 		defer_next_render = true
 	else:
 		_end_preview()
