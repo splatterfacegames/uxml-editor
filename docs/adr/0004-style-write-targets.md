@@ -4,7 +4,11 @@
 > (`EdUssCommands.inline_target`, `rule_target`, `new_rule_target`) freeze
 > the source and the exact spans, and a stale commit is refused. Milestone
 > 1 writes inline styles only; the target picker over all cascade
-> candidates waits for godot-uxml request R5. godot-uxml already reports
+> candidates waits for godot-uxml request R5. Milestone 3 canvas gestures
+> (`EdLayoutCommands`) write each layout property to the declaration that
+> wins today: the authored rule or the inline declaration, or a new inline
+> declaration for a theme or default value. A pseudo-state winner and an
+> overridden longhand are refused. godot-uxml already reports
 > the winning origin of each computed value. The `evidence`
 > (measured/documented) labels below came from `uxml-preview`; godot-uxml
 > theme values are all measured in Unity 6000.3.

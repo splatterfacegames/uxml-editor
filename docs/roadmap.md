@@ -6,12 +6,31 @@ render, pan, zoom, selection and hit-test, the hierarchy, the source view
 in sync, one undo history, inspector v1 (attributes and inline styles),
 revision-checked saves.
 
-The milestones below are a proposal. Each milestone ends with the headless
+Milestones 2 and 3 (done on the `godot` branch, against godot-uxml
+`0c8b6cd` with workarounds): see the two sections below. Screenshots:
+`docs/screenshots/m2-*.png` and `m3-*.png`.
+
+The milestones after M3 are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
 requests (`docs/godot-uxml-requests.md`) are named where a milestone
 depends on one; each request lands in godot-uxml first, then the pin moves.
 
-## M2. Structure editing and the palette
+## M2. Structure editing and the palette (done)
+
+Done: the library (every element that godot-uxml renders, five groups,
+search, insert at the selection, drag to the canvas or the hierarchy,
+namespace declaration in the same edit), hierarchy drag to reorder and
+reparent, multi-selection (Shift/Ctrl in the hierarchy, Shift+click in the
+canvas), rename of the element type, duplicate, wrap, unwrap, cut, copy,
+paste, delete, move up and down, all one undo step each. The library is a
+static table behind `EdElementCatalog` until request R9; drag and drop
+reads list rows through public calls until request R12.
+
+Not done: a context menu in the hierarchy (the Edit menu and the
+shortcuts cover the commands); attribute lists per element in the
+inspector (request R9).
+
+The proposal was:
 
 - **Palette** of every element that godot-uxml supports, runtime
   (`ui:`) and editor (`uie:`), grouped as in the Unity library (containers,
@@ -26,7 +45,23 @@ depends on one; each request lands in godot-uxml first, then the pin moves.
   contiguous siblings. Each action already exists in the core with tests.
 - **Copy and paste** of element source (port of `ClipboardService`).
 
-## M3. Canvas manipulation
+## M3. Canvas manipulation (done)
+
+Done: move and resize handles, one coalesced undo step per drag, Escape
+cancels; nudge with the arrow keys (a run of keys is one step); write
+targets after ADR 0004 (the winning rule or inline declaration; theme and
+default values go inline; pseudo-state winners and overridden longhands
+are refused); snapping to sibling and parent edges and centres with
+guides, a pixel grid, Shift keeps the ratio, Alt or Ctrl turns snapping
+off; hit-test through Control transforms (the R8 workaround); preview
+mode that sends the mouse and the keyboard to the document.
+
+Not done: alignment and distribution of several elements (the TypeScript
+`align` and `distribute`); the rotated outline of a transformed element
+(the overlay draws the unrotated rectangle); a write-target picker for a
+canvas gesture (M4 adds the picker to the inspector).
+
+The proposal was:
 
 - **Drag and resize handles** on the selection. A gesture writes one
   coalesced transaction: `left`/`top` for absolute elements, `width`/

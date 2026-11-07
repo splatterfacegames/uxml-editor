@@ -15,9 +15,14 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │ src/app/       Editor window and views                               │
 │                main.gd            composition root, shortcuts, saves │
 │                editor_state.gd    project, selection, one history    │
-│                canvas_view.gd     SubViewport, pan/zoom, overlay     │
+│                canvas_view.gd     SubViewport, pan/zoom, overlay,    │
+│                                   handles, guides, preview input     │
+│                layout_controller  canvas gestures -> layout writes   │
+│                drag_controller    drag and drop between the views    │
+│                palette_view.gd    the library TreeView               │
 │                source_view.gd     CodeEdit, LF display copy          │
 │                inspector_view.gd  generated godot-uxml document      │
+│                demo.gd            staged states for screenshots      │
 │                ui/*.uxml, *.uss   the window, authored in UXML       │
 ├───────────────────────────────────────────────────────────────────────┤
 │ src/render/    godot-uxml as the renderer                            │
@@ -30,6 +35,13 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                uss_source.gd      USS -> items with spans            │
 │                source_patch.gd    validate / apply / invert patches  │
 │                uxml_commands.gd   attribute and structure edits      │
+│                structure_commands insert from the library, unwrap,   │
+│                                   remove/move several, placement     │
+│                clipboard.gd       copy, paste, duplicate             │
+│                layout_commands.gd move/resize/nudge as style writes  │
+│                snap.gd            snapping geometry                  │
+│                step_composer.gd   several steps -> one transaction   │
+│                element_catalog.gd library elements (request R9 seam) │
 │                uss_commands.gd    rule and inline declaration edits  │
 │                workspace.gd       buffers + one EdCommandHistory     │
 │                project_store.gd   enumerate, read, revision-checked  │
@@ -118,9 +130,11 @@ a USS file). Every view makes transactions and passes them to
 
 | View | Edits |
 | --- | --- |
-| Canvas | selection; Delete removes the selected element |
-| Hierarchy | selection |
-| Inspector | attributes, inline style declarations |
+| Canvas | selection; move, resize and nudge (layout writes); drops from the library and the hierarchy |
+| Hierarchy | selection; drag to reorder and reparent |
+| Library | insert at the selection; drag to insert at a drop position |
+| Edit menu and shortcuts | cut, copy, paste, duplicate, delete, wrap, unwrap, move up and down |
+| Inspector | attributes, inline style declarations, the element type (rename) |
 | Source | any text; typing coalesces into one step per pause run |
 
 A transaction records the selection before it and may name the selection
@@ -128,17 +142,106 @@ after it. Undo restores the selection before. Selection is a list of
 `EdLocator` dictionaries, which find the element again after a re-parse
 (unique `name` first, then child path with structure and attribute hints).
 
+A command that needs several steps (declare a namespace, then insert; set
+`left`, then `top`) runs the steps on a shadow copy of the workspace
+(`EdStepComposer`). Each step plans against the text of the step before.
+`EdSequentialPatchComposer` turns the steps into one patch set per file
+against the original text, so the result is one transaction and one undo
+step.
+
 A reload from disk replaces a buffer. The history then drops the newest
 step that touches that file and every older step; newer steps touch other
 files only and stay valid.
+
+## Structure editing
+
+- **Library.** `EdElementCatalog` lists every element that godot-uxml
+  renders, with its namespace, its group and the default attributes of a
+  new element. The table is a seam for request R9: a test compares it with
+  the tags that godot-uxml knows (`UssControls.IMPLICIT_CLASSES`), and a
+  second test renders every entry without an `unsupported-control`
+  diagnostic.
+- **Placement.** "Insert at the selection" puts the element into a
+  selected container (the catalog `container` flag; an unknown element
+  counts as a container), or after a selected leaf, or at the end of the
+  root.
+- **Namespaces.** A new element uses the prefix that the document binds to
+  its namespace. Without one, the same transaction declares `xmlns:ui` or
+  `xmlns:uie` (or a free variant) on the root element. Wrap does the same.
+  Paste adds the declaration of a missing prefix to the pasted element and
+  refuses a prefix that the destination binds to another URI.
+- **Unwrap** removes the open and close tags. A tag alone on its line
+  takes the line. The lines of the children lose one indent unit, except
+  line starts inside an open tag (attribute values keep their bytes).
+- **Clipboard.** Copy keeps the exact source of each element and the
+  namespace declarations in scope (port of `ClipboardService`). The system
+  clipboard gets the plain text. A paste of text that equals the last copy
+  uses the namespace data of that copy; other text pastes when it is
+  element source whose prefixes the destination binds. A headless run has
+  no system clipboard; the editor then uses its own copy.
+- **Drag and drop** (`EdDragController`) reads the raw mouse events of the
+  window and never takes the press, so the lists still select. Rows are
+  found with the public `get_list_rows()` and `UxmlListRow.get_element()`.
+  A hierarchy drop goes before, into or after the row by the pointer
+  height. A canvas drop goes into the deepest container under the pointer,
+  at the child index along its `flex-direction`.
+
+## Canvas manipulation
+
+- **Gestures.** A drag on the selected element moves it; a drag on one of
+  the eight handles resizes it. `EdLayoutController` freezes the start
+  state (computed style, rectangle, snap targets) and plans the whole
+  gesture from that start at each pointer move. Each step executes with
+  the coalesce key of the gesture, so the history merges the steps into
+  one undo step, and the canvas shows the real godot-uxml render after
+  each step. At most one step runs per frame. Escape cancels a drag and
+  undoes its steps.
+- **Nudge.** Arrow keys move the selection. A run of keys is one gesture
+  while each key comes within 0.8 s (or two frames, for slow renders) of
+  the render of the key before, the selection stays, and no other edit
+  comes between.
+- **Properties.** An absolute element moves with `left` and `top`, a
+  relative element with `margin-left` and `margin-top`. A resize writes
+  `width` and `height`; a handle on the left or top edge also moves the
+  element, so the opposite edge stays. Values are whole pixels. A value
+  that is not in px (`auto`, a percentage) is refused for a move; a resize
+  measures the rendered border box.
+- **Write targets** (ADR 0004, port of `layoutStyleWritePlanner.ts`). The
+  godot-uxml computed style names the declaration that wins.
+  `EdRenderHost.style_facts()` normalizes the origin: a rule of a project
+  stylesheet, a theme rule, inline, inherited or default. A property is
+  written where its winner is: the rule declaration, or the inline
+  declaration. A winner from the theme or from no declaration gets a new
+  inline declaration. A winner from a pseudo-state rule is refused. When
+  the winner is a shorthand (`margin`), the longhand is appended to the
+  same block after it; an earlier longhand in that block is refused,
+  because the shorthand overrides it. Two selected elements that share one
+  rule need the same value.
+- **Snapping** (`EdSnap`). The left, centre and right edges (top, middle,
+  bottom) snap to the edges and centres of the siblings and the parent
+  within 6 screen pixels, and draw a guide. Without a target the leading
+  edge snaps to the pixel grid.
+- **Hit-test.** `EdRenderHost.hit_test()` tests the point in the local
+  space of each control and of every clipping ancestor, so rotate, scale
+  and translate apply (godot-uxml sets them on the Control transform).
+  This is the workaround for request R8.
+- **Preview.** The canvas sends its input to the SubViewport
+  (`push_input`) in document pixels. When a control in the document takes
+  the focus, Godot removes the focus from the viewport of the editor
+  window, so `EdMain._input` sends key events to the document after a
+  click in the canvas, until a click elsewhere. Ctrl+S, Z, Y, P and O stay
+  with the editor. The end of preview renders the document again from the
+  source.
 
 ## Editor window
 
 The window is `src/app/ui/editor_shell.uxml`, rendered by godot-uxml with
 the Unity editor dark skin. The toolbar is a `uie:Toolbar` with
-`ToolbarButton` and `ToolbarMenu` elements, the panes are
-`TwoPaneSplitView` elements, the project list and the diagnostics are
-`ListView` elements, and the hierarchy is a `TreeView`. The inspector is a
+`ToolbarButton`, `ToolbarToggle` (Snap, Preview) and `ToolbarMenu` (Edit,
+grid, screen size, theme) elements, the panes are `TwoPaneSplitView`
+elements, the project list and the diagnostics are `ListView` elements,
+the hierarchy and the library are `TreeView` elements, and the library
+search is a `uie:ToolbarSearchField`. The inspector is a
 second godot-uxml document that the editor generates as UXML text for each
 selection.
 
@@ -151,6 +254,8 @@ one is mounted into a `*-host` element of the window document:
 | `CodeEdit` | source view | text editing, IME, gutters and search; a godot-uxml `TextField` is a field, not a code editor |
 | `FileDialog` (native) | Open Project | the operating system folder picker |
 | `ConfirmationDialog` | save over an external change | a modal question; godot-uxml has no modal window |
+| `EdDragController` (a `Control` over the window) | drag and drop | draws the drag label and the hierarchy drop line over the godot-uxml shell; godot-uxml has no drag-and-drop API (request R12); it ignores the mouse |
+| `EdCanvasView._draw` | selection outlines, handles, snap guides, the drop hint, the preview badge | drawn over the SubViewport texture at the canvas zoom; not document content |
 
 ## Projects and saving
 
@@ -193,6 +298,16 @@ godot-uxml native core.
 - App: the real editor scene, headless: open, hit-test, selection sync,
   inspector and source edits through one history, re-render from unsaved
   USS, revision-checked save, external change reload.
+- Structure and layout: the library catalog against godot-uxml, insert
+  with a namespace declaration, unwrap, remove and move of several
+  elements, the clipboard, the step composer, write targets, gesture
+  math, snapping, one undo step per gesture.
+- Editing in the app (`tests/unit/test_app_editing.gd`): the input goes
+  through the window (`Viewport.push_input`): library insert and search,
+  drag from the library to the hierarchy and the canvas, hierarchy
+  reorder and reparent, the Edit commands and shortcuts, rename, a resize
+  drag and a move drag with a snap, a write to the winning USS rule,
+  nudge, preview clicks and typing.
 
 ## Updating godot-uxml
 

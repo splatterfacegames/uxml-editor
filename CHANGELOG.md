@@ -21,6 +21,35 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Added (Godot rebuild, milestones 2 and 3)
+
+- Library panel: every element that godot-uxml renders, runtime and
+  editor, in five groups, with search. Double-click or Enter inserts at
+  the selection; a drag inserts at the drop position on the canvas or in
+  the hierarchy. A missing `xmlns:ui` or `xmlns:uie` is declared on the
+  root in the same undo step.
+- Hierarchy drag and drop to reorder and reparent; multi-selection in the
+  hierarchy (Shift, Ctrl) and the canvas (Shift+click).
+- Edit menu and shortcuts: cut, copy, paste, duplicate, delete, wrap in a
+  VisualElement, unwrap, move up and down. Copy keeps the exact source and
+  the namespace declarations; paste and duplicate make copied names
+  unique. The inspector **Element** field (F2) renames the element type.
+- New core commands: `EdStructureCommands` (insert from the library,
+  unwrap, remove and move several elements, placement), `EdClipboard`
+  (port of `ClipboardService`), `EdStepComposer` (several command steps as
+  one transaction).
+- Canvas move and resize handles, keyboard nudge, snapping to siblings,
+  the parent and a pixel grid, with guides. Each drag and each run of
+  arrow keys is one undo step. Layout values go to the declaration that
+  wins today (USS rule or inline), after ADR 0004 (`EdLayoutCommands`,
+  port of `layoutCommands.ts` and `layoutStyleWritePlanner.ts`).
+- Preview mode (Ctrl+P): the canvas sends the mouse and the keyboard to
+  the document.
+- Hit-test through rotate, scale and translate (Control transforms).
+- `--demo=<name>` stages a documentation state before `--screenshot`.
+- Tests: 39 new tests (138 in total, 1249 checks) on both godot-uxml
+  paths, with end-to-end input through the window.
+
 ### Added (Tauri editor, `main`)
 
 - `--open <project-dir>` (or a bare directory argument) opens a Unity project

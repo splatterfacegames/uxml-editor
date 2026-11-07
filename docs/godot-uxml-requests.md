@@ -19,10 +19,13 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R5 | P2 | winner only | All cascade candidates of a property |
 | R6 | P2 | none | Forced pseudo-states on an element |
 | R7 | P2 | none | Transition snapshot and seek |
-| R8 | P2 | workaround | Hit-test that respects transforms and clipping |
-| R9 | P2 | none | Catalog of supported elements and attributes |
+| R8 | P2 | workaround (transforms applied) | Hit-test that respects transforms and clipping |
+| R9 | P2 | static table | Catalog of supported elements and attributes |
 | R10 | P3 | workaround | Template instance of a cloned element |
 | R11 | P3 | partial | End offsets on every diagnostic |
+| R12 | P2 | workaround | Drag and drop for collection items |
+| R13 | P3 | bug | `background-image: none` on a checked ToolbarToggle |
+| R14 | P3 | workaround | Rectangle of an element in another element's space |
 
 ## R1. Load from text with a caller resolver (P1)
 
@@ -168,9 +171,13 @@ only moves forward.
 func element_at(point: Vector2, respect_picking: bool = false) -> UxmlElement
 ```
 
-**Use case.** Canvas selection. **Workaround.** `EdRenderHost.hit_test()`
-tests control rectangles cut by clipping ancestors. A rotated or scaled
-element hits at its untransformed rectangle.
+**Use case.** Canvas selection, drop targets. **Workaround.**
+`EdRenderHost.hit_test()` tests the point in the local space of each
+control and of every clipping ancestor (`get_global_transform()`), so
+rotate, scale and translate apply because godot-uxml sets them on the
+Control transform. `picking-mode` is not applied (the editor selects what
+the author wrote). The workaround depends on the private `_controls` and
+`_parents` maps (R2).
 
 ## R9. Catalog of supported elements (P2)
 
@@ -184,6 +191,14 @@ static func catalog() -> Array
 **Use case.** The palette lists every element that godot-uxml supports,
 and the inspector offers the attributes of the selected control.
 
+**Workaround.** `src/core/element_catalog.gd` (`EdElementCatalog`) is a
+static table with the namespace, the library group, a container flag and
+the default attributes of a new element. `tests/unit/test_structure_commands.gd`
+compares it with `UssControls.IMPLICIT_CLASSES` and renders every entry.
+Please add `container: bool` (the element takes authored children) and,
+per attribute, an `enum` value list; the palette and the inspector need
+both. To adopt R9, make `EdElementCatalog.entries()` read the catalog.
+
 ## R10. Template instance of a cloned element (P3)
 
 ```gdscript
@@ -196,6 +211,49 @@ func instance_of(element: UxmlElement) -> UxmlElement
 **Use case.** A click on template content selects the instance in the
 entry document. **Workaround.** Walk `_parents` up to the first element
 that is not in `element_paths`.
+
+## R12. Drag and drop for collection items (P2)
+
+```gdscript
+# UxmlDocument
+## A drag of selected items started (Unity CanStartDrag / SetupDragAndDrop).
+signal items_drag_started(element_name, indices, global_position)
+## The visible item index and its global rectangle at a point, or -1.
+func get_item_index_at(list_name: String, global_point: Vector2) -> int
+func get_item_rect(list_name: String, index: int) -> Rect2
+```
+
+**Use case.** The library and the hierarchy start drags; the hierarchy is
+also a drop target (before, into, after a row).
+
+**Workaround.** `EdDragController` watches the raw mouse events of the
+window, finds rows with `get_list_rows()` and `UxmlListRow.get_element()`
+(public), and draws its own drag label and drop line. A `reorderable`
+list moves items itself; the editor does not set `reorderable`.
+
+## R13. `background-image: none` on a checked ToolbarToggle (P3, bug)
+
+A `uie:ToolbarToggle` with `value="true"` in the editor dark skin reports
+`missing-file: background-image "none" resolved to
+res://addons/godot_uxml/themes/none but is not a readable image` (the
+theme sheets set `background-image: none`, for example
+`unity-editor-dark.uss` line 421). `none` is a keyword, not a path.
+The editor shell shows the warning for its Snap toggle.
+
+## R14. Rectangle of an element in another element's space (P3)
+
+```gdscript
+# UxmlDocument
+## The border box of `element` in the coordinates of `space` (null: the
+## document), as Unity WorldToLocal / ChangeCoordinatesTo.
+func get_element_rect(element: UxmlElement, space: UxmlElement = null) -> Rect2
+```
+
+**Use case.** Snap targets, drop indicators and the absolute `left`/`top`
+fallback need the rectangles of the parent, the siblings and the
+children, and the parent border. **Workaround.** `EdRenderHost.rect_of()`
+reads `Control.get_global_rect()` of the private control map (R2), and
+`border_start()` reads the computed border widths.
 
 ## R11. End offsets on every diagnostic (P3)
 
