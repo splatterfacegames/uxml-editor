@@ -6,11 +6,12 @@ render, pan, zoom, selection and hit-test, the hierarchy, the source view
 in sync, one undo history, inspector v1 (attributes and inline styles),
 revision-checked saves.
 
-Milestones 2 and 3 (done on the `godot` branch, against godot-uxml
-`0c8b6cd` with workarounds): see the two sections below. Screenshots:
-`docs/screenshots/m2-*.png` and `m3-*.png`.
+Milestones 2, 3 and 5 (done on the `godot` branch, against godot-uxml
+`0c8b6cd` with workarounds): see the sections below. Screenshots:
+`docs/screenshots/m2-*.png`, `m3-*.png` and `m5-*.png`. Milestone 5 came
+before milestone 4, after a frame-cost pass (see "Frame cost" below).
 
-The milestones after M3 are a proposal. Each milestone ends with the headless
+The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
 requests (`docs/godot-uxml-requests.md`) are named where a milestone
 depends on one; each request lands in godot-uxml first, then the pin moves.
@@ -26,9 +27,8 @@ paste, delete, move up and down, all one undo step each. The library is a
 static table behind `EdElementCatalog` until request R9; drag and drop
 reads list rows through public calls until request R12.
 
-Not done: a context menu in the hierarchy (the Edit menu and the
-shortcuts cover the commands); attribute lists per element in the
-inspector (request R9).
+Not done: attribute lists per element in the inspector (request R9). The
+hierarchy context menu came with milestone 5.
 
 The proposal was:
 
@@ -88,7 +88,45 @@ The proposal was:
   picker for `url()` / `resource()` with project path validation.
 - Class list editor and a USS rule view of the selected sheet.
 
-## M5. Diagnostics and recovery
+## Frame cost (done)
+
+`bench/frame_cost.gd` measures the editor frame on both godot-uxml paths.
+Each selection change and each render rebuilt the inspector document
+(about 300 ms native, 900 ms GDScript), and each canvas drag step reloaded
+the document. Now the inspector changes in place, `style` and `class`
+edits patch the render, and the window skips unchanged list, menu and
+label updates. Menu fixture, median per frame: selection 246 -> 9 ms
+native and 879 -> 17 ms GDScript; drag 335 -> 8 ms native and 935 -> 14 ms
+GDScript; idle 0.02 ms. Large documents still pay a full reload for
+structure and USS edits (requests R4, R15). The bench also found that a
+typing pause never committed the source view; that is fixed.
+
+## M5. Diagnostics and recovery (done)
+
+Done:
+
+- **Diagnostics panel**: godot-uxml diagnostics of the last render of each
+  open document, the parse problems of the editor, unknown elements and
+  the last 20 refused edits. Filters by severity, file and source. A
+  selection opens the document, selects the element in the canvas and the
+  hierarchy, and selects the range in the source view. The end of the
+  range comes from the editor parse (request R11).
+- **Recovery journal** (ADR 0005, section "Godot app"): a hash-chained,
+  versioned JSON-lines journal per project, a record at each buffer
+  change, compaction past 4 MB, Recover or Discard at the next open,
+  after the external-change check. A test kills a child editor process
+  by its PID and recovers its edit.
+- **External changes** on a 2-second timer and on focus, with a cheap
+  size and time check. Clean files reload; dirty files ask Reload or Keep.
+- **Tabs** over the canvas with one history (ADR 0008); Ctrl+W, Ctrl+Tab.
+- Small limits of M2: the hierarchy has a context menu with the Edit
+  commands; an insert into `<VisualElement />` writes `<VisualElement>`.
+
+Not done: a compare view for a conflict (the question offers reload or
+keep); a lock for two editors on one project (they share one journal);
+the editor-skin look of the context menu (request R16).
+
+The proposal was:
 
 - **Diagnostics** per document with filters (kind, file), a jump to the
   exact source range (request R11), and editor refusals in the same list.

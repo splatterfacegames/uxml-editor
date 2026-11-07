@@ -20,7 +20,8 @@ extends RefCounted
 ##   clean   {path}                        the file has no unsaved edit
 ##                                         (saved, reloaded, undone)
 ##
-## Each record is flushed to the operating system at once. When the file
+## Each record is appended and the file closed at once (the record is with
+## the operating system before record() returns). When the file
 ## grows past MAX_BYTES, compact() writes a new journal with one base and
 ## one patch per unsaved file (temporary file, then rename).
 
@@ -30,7 +31,8 @@ const MAX_BYTES := 4 * 1024 * 1024
 
 var dir: String = ""
 var project_root: String = ""
-var _file: FileAccess = null
+## The journal takes records (start() ran, close() did not).
+var _active := false
 var _seq := 0
 var _prev := ""
 var _bytes := 0
@@ -63,7 +65,7 @@ func exists() -> bool:
 
 
 func is_open() -> bool:
-	return _file != null
+	return _active
 
 
 ## Start a new, empty journal (a header only). Replaces an old journal.
@@ -81,7 +83,7 @@ func start() -> Variant:
 ## file (EdWorkspace.base[path]). The record is a patch from the text of
 ## the last record of the file (or from the base).
 func record(path: String, new_text: String, dirty: bool, base: Dictionary) -> void:
-	if _file == null:
+	if not _active:
 		return
 	if not dirty:
 		if _texts.has(path):
@@ -126,9 +128,7 @@ func discard() -> void:
 
 
 func close() -> void:
-	if _file != null:
-		_file.close()
-		_file = null
+	_active = false
 
 
 ## The unsaved files of the journal at `journal_dir`:
@@ -243,8 +243,16 @@ func _line(rec: Dictionary) -> String:
 
 func _append(rec: Dictionary) -> void:
 	var line := _line(rec)
-	_file.store_string(line + "\n")
-	_file.flush()
+	# Open, append, close: each record reaches the operating system at
+	# once, and no file handle stays open (Windows cannot delete an open
+	# file).
+	var f := FileAccess.open(file_path(), FileAccess.READ_WRITE)
+	if f == null:
+		_active = false
+		return
+	f.seek_end()
+	f.store_string(line + "\n")
+	f.close()
 	_bytes += line.length() + 1
 
 
@@ -268,8 +276,7 @@ func _write_new(records: Array) -> Variant:
 	var err := DirAccess.rename_absolute(tmp, file_path())
 	if err != OK:
 		return EdError.make("journal-write-failed", "The recovery journal could not be replaced (%s)." % error_string(err))
-	_file = FileAccess.open(file_path(), FileAccess.READ_WRITE)
-	if _file == null:
+	_active = FileAccess.file_exists(file_path())
+	if not _active:
 		return EdError.make("journal-write-failed", "The recovery journal could not be opened.")
-	_file.seek_end()
 	return null

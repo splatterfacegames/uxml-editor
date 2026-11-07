@@ -562,7 +562,7 @@ func run_command(cmd: String) -> bool:
 
 ## The hierarchy context menu at global point `at`: the row under the
 ## point joins the selection first (as in Unity), then the Edit commands.
-## The menu is a godot-uxml popup (UxmlPopupMenu) under a zero-size anchor
+## The menu is a godot-uxml popup (UxmlPopupMenu) under an anchor Control
 ## at the point.
 func open_context_menu(at: Vector2) -> void:
 	_close_context_menu()
@@ -577,7 +577,7 @@ func open_context_menu(at: Vector2) -> void:
 	_menu_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_menu_anchor)
 	_menu_anchor.global_position = at
-	_menu_anchor.size = Vector2(160, 0)
+	_menu_anchor.size = Vector2(250, 0)
 	context_menu = UxmlPopupMenu.open(_menu_anchor, PackedStringArray(CONTEXT_MENU.map(func(e): return e[0])), -1, shell.theme_path, shell)
 	context_menu.chosen.connect(func(i): run_command(CONTEXT_MENU[i][1]))
 	context_menu.popup_hide.connect(_close_context_menu, CONNECT_DEFERRED)
@@ -702,10 +702,10 @@ func _on_watch_timer() -> void:
 ## window).
 ## `tag` names the question (a question with the tag of a waiting or open
 ## question is not asked again).
-func ask(text: String, ok_text: String, cancel_text: String, on_ok: Callable, on_cancel: Callable = Callable(), tag: String = "") -> void:
+func ask(text: String, ok_text: String, cancel_text: String, on_ok: Callable, on_cancel: Callable = Callable(), tag: String = "", title: String = "UXML Editor") -> void:
 	if not tag.is_empty() and (_asking_tag == tag or _asks.any(func(q): return q["tag"] == tag)):
 		return
-	_asks.append({"text": text, "ok": ok_text, "cancel": cancel_text, "on_ok": on_ok, "on_cancel": on_cancel, "tag": tag})
+	_asks.append({"text": text, "ok": ok_text, "cancel": cancel_text, "on_ok": on_ok, "on_cancel": on_cancel, "tag": tag, "title": title})
 	if _asking == null:
 		_next_question()
 
@@ -718,6 +718,7 @@ func _next_question() -> void:
 	var q: Dictionary = _asks.pop_front()
 	_asking_tag = q["tag"]
 	var d := ConfirmationDialog.new()
+	d.title = q["title"]
 	d.dialog_text = q["text"]
 	d.ok_button_text = q["ok"]
 	d.cancel_button_text = q["cancel"]
@@ -761,13 +762,13 @@ func _on_recovery_found(info: Dictionary) -> void:
 		text += "\n\nChanged on disk since then: %s. A save of a recovered file asks before an overwrite." % ", ".join(conflicts)
 	if info.get("truncated", false):
 		text += "\n\nThe last record was incomplete and is not used."
-	ask(text, "Recover", "Discard", func(): state.recover(), func(): state.discard_recovery(), "recovery")
+	ask(text, "Recover", "Discard", func(): state.recover(), func(): state.discard_recovery(), "recovery", "Recover unsaved edits")
 
 
 func _on_external_conflicts(paths: Array) -> void:
 	for p in paths:
 		ask("%s changed on disk, and the editor has unsaved edits of the file.\n\nReload the file from disk (the unsaved edits are lost), or keep the editor text (a save asks before an overwrite)?" % p,
-			"Reload from disk", "Keep editor text", func(): state.reload_from_disk(p), func(): state.keep_editor_text(p), "conflict:" + p)
+			"Reload from disk", "Keep editor text", func(): state.reload_from_disk(p), func(): state.keep_editor_text(p), "conflict:" + p, "File changed on disk")
 
 
 func _notification(what: int) -> void:

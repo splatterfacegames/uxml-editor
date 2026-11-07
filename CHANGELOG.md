@@ -21,6 +21,52 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Added (Godot rebuild, milestone 5)
+
+- Diagnostics panel: godot-uxml diagnostics of every open document, the
+  editor parse problems, unknown elements and refused edits, with filters
+  by severity, file and source. A selection selects the range in the
+  source view and the element in the canvas and the hierarchy.
+- Recovery journal (ADR 0005): every unsaved edit is written at once to a
+  hash-chained, versioned journal per project. The next open after a
+  crash asks Recover or Discard, after a check for external changes.
+- Changes on disk are checked every 2 seconds (`--watch-interval`) as
+  well as on focus. Clean files reload; a file with unsaved edits asks
+  Reload from disk or Keep editor text.
+- Document tabs over the canvas with one history for all tabs (ADR
+  0008). Ctrl+W closes a tab, Ctrl+Tab shows the next tab.
+- Hierarchy context menu (right-click) with the Edit commands.
+- `bench/frame_cost.gd`: frame cost of the editor on both godot-uxml
+  paths; `--gdscript`, `--recovery-dir`, `--ready-file` and
+  `--exit-after` options.
+- Tests: 22 new tests (160 in total, 1375 checks) on both godot-uxml
+  paths, among them a test that kills a child editor process by its PID
+  and recovers its edit.
+
+### Changed (Godot rebuild, frame cost)
+
+- The inspector builds its godot-uxml document once and changes it in
+  place. A selection change on the menu fixture costs about 9 ms (native)
+  and 17 ms (GDScript) instead of about 250 ms and 880 ms.
+- A `style` or `class` change of rendered elements patches the canvas
+  render through the godot-uxml model instead of a full reload. A canvas
+  drag frame costs about 8 ms (native) and 14 ms (GDScript) instead of
+  about 335 ms and 935 ms.
+- Window lists, menus and labels skip updates with unchanged data;
+  labels that change often have a size that does not depend on the text.
+- The hierarchy keeps a row index, the hit-test tries the deepest element
+  first, and the source view replaces only the changed text.
+- The inspector shows the element and its `name` in one title line; the
+  common attributes and style properties keep fixed rows.
+
+### Fixed (Godot rebuild)
+
+- A pause in typing in the source view now makes a transaction. The pause
+  timer called `flush()`, which returned at once because a one-shot timer
+  is already stopped when it times out.
+- An insert into a self-closing parent writes `<VisualElement>`, not
+  `<VisualElement >`. A line break before `/>` stays.
+
 ### Added (Godot rebuild, milestones 2 and 3)
 
 - Library panel: every element that godot-uxml renders, runtime and

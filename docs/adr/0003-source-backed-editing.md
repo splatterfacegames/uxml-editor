@@ -6,7 +6,7 @@
 > byte-identical, and the ported command suites in `tests/unit/` check the
 > exact patches and the non-mutation of refused edits. Offsets are now
 > Godot String code points, so the UTF-16 surrogate checks have no
-> equivalent.
+> equivalent. Document tabs share the one history (ADR 0008).
 
 
 ## Decision

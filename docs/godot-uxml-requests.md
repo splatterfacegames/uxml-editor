@@ -15,17 +15,19 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R1 | P1 | workaround | Load from text with a caller resolver |
 | R2 | P1 | workaround | Element-handle lookups |
 | R3 | P1 | relied on, untested upstream | Stable source offsets on `UxmlElement` |
-| R4 | P2 | full reload | Partial reload of one stylesheet or one document |
+| R4 | P2 | patch for `style`/`class`, else full reload | Partial reload of one stylesheet or one document |
 | R5 | P2 | winner only | All cascade candidates of a property |
 | R6 | P2 | none | Forced pseudo-states on an element |
 | R7 | P2 | none | Transition snapshot and seek |
 | R8 | P2 | workaround (transforms applied) | Hit-test that respects transforms and clipping |
 | R9 | P2 | static table | Catalog of supported elements and attributes |
 | R10 | P3 | workaround | Template instance of a cloned element |
-| R11 | P3 | partial | End offsets on every diagnostic |
+| R11 | P3 | workaround (editor finds the end) | End offsets and a severity on every diagnostic |
 | R12 | P2 | workaround | Drag and drop for collection items |
 | R13 | P3 | bug | `background-image: none` on a checked ToolbarToggle |
 | R14 | P3 | workaround | Rectangle of an element in another element's space |
+| R15 | P2 | workaround (in-place updates) | Build cost of a document; text updates without a layout |
+| R16 | P3 | workaround | Context menu at a point, in the look of the owner document |
 
 ## R1. Load from text with a caller resolver (P1)
 
@@ -104,6 +106,17 @@ typing in the source view re-renders at each pause. The full reload costs
 10-600 ms on the fixtures and resets scroll offsets, focus and
 transitions. A USS edit only needs a restyle; an attribute edit only needs
 `UxmlElement.set_attribute()` on the matching element.
+
+**Workaround (2026-11-07).** `EdRenderHost.patch()` handles the common
+case: when the only change of the entry buffer is the value of a `style`
+or `class` attribute of rendered elements (or such an attribute added or
+removed), the new values go to the godot-uxml model through
+`UxmlElement.set_attribute()` and the document restyles itself. Canvas
+drags, nudges and inline style edits take this path. Measured with
+`bench/frame_cost.gd`: a move step on a 507-element document costs about
+25 ms (restyle and layout) instead of about 850 ms (full reload), native
+path. A USS edit, a structure edit or another attribute still reloads the
+whole document.
 
 ## R5. All cascade candidates of a property (P2)
 
@@ -255,10 +268,74 @@ children, and the parent border. **Workaround.** `EdRenderHost.rect_of()`
 reads `Control.get_global_rect()` of the private control map (R2), and
 `border_start()` reads the computed border widths.
 
-## R11. End offsets on every diagnostic (P3)
+## R11. End offsets and a severity on every diagnostic (P3)
 
 Every diagnostic gets `end_offset` (parser warnings have one today; cascade
-and runtime diagnostics do not).
+and runtime diagnostics do not) and `severity` ("error", "warning",
+"info").
 
-**Use case.** The diagnostics panel highlights the exact range in the
-source view.
+**Use case.** The diagnostics panel selects the exact range in the source
+view and filters by severity.
+
+**Workaround.** `EdDiagnostics.range_end()` finds the end: the open tag of
+an element that starts at the offset, the attribute that holds the offset,
+or the token. `EdDiagnostics.severity_of()` maps the kinds: `malformed`,
+`import-*`, `missing-file`, `path-outside-root`, `malformed-reference` and
+`template-*` are errors, `version-dependent` is info, the others are
+warnings.
+
+## R15. Build cost of a document; text updates without a layout (P2)
+
+Measured on the editor inspector, a generated document of 310 controls
+(rows of `TextField` and `Button` in `Foldout` sections, editor theme):
+
+| Step | Native | GDScript |
+| --- | --- | --- |
+| `_index()` (build the controls) | 160-290 ms | 430-460 ms |
+| first `_restyle_now()` | 120-160 ms | 430-550 ms |
+| a `display` change of one row (restyle and layout) | 6 ms, then 12 ms in the next frame | 60 ms, then 90 ms in the next frame |
+| a `label` change of one `TextField` | 4 ms | 70 ms |
+| a paint-only class change (`color`) | 1.4 ms | 10 ms |
+| `visibility` change | 1 ms | 4 ms |
+
+A 507-element document (12 panels of labels, buttons, toggles and text
+fields) loads in about 850 ms on the native path.
+
+Requests:
+
+1. Lower the build cost per control (about 0.5 ms native and 1.5 ms
+   GDScript per control today).
+2. `UxmlDocument.set_text()` lays out the whole document. A Label whose
+   size does not depend on its text (fixed width, or stretched by its
+   parent) needs no layout.
+3. A `text` change of the model (`UxmlElement.set_attribute("text", ...)`)
+   is not applied to a Label or a Button control. `label` on a field is.
+4. A `display` change lays out twice (the second pass in the next frame,
+   `_unsettled`).
+
+**Workaround.** The inspector builds its document once and changes it in
+place (`EdInspectorView`): values and placeholders go straight to the
+`LineEdit` controls, labels of fixed size straight to the `Label`
+controls (`EdUi.set_label()`), and the model attributes change without a
+change notification (`EdUi.set_silent()`). Rows that are not in use are
+`visibility: hidden`, so a new selection needs no layout. Window labels
+that change often (status, history, source state, zoom) have a size that
+does not depend on the text, for the same fast path.
+
+## R16. Context menu at a point (P3)
+
+```gdscript
+# UxmlDocument
+## A menu at `global_point` with `items` (Unity DropdownMenu /
+## ContextualMenuManipulator). Emits menu_chosen(index). The menu uses the
+## theme and the editor skin of this document.
+func show_context_menu(global_point: Vector2, items: PackedStringArray) -> void
+```
+
+**Use case.** The hierarchy context menu (the Edit commands).
+
+**Workaround.** `UxmlPopupMenu.open()` under a `Control` anchor at the
+pointer (its width sets the menu width). The menu takes the theme path of
+the shell document but not its editor theme and skin, so it has the
+runtime look in the editor window (the same as the menus of `ToolbarMenu`
+elements).

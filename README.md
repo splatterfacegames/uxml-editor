@@ -24,6 +24,10 @@ message. Such an edit changes no file and adds no undo step.
 
 - **Projects.** Open a project directory. The editor lists every `.uxml`
   and `.uss` file and skips Unity cache folders.
+- **Tabs.** Each UXML document opens in a tab over the canvas. A click on
+  a tab shows the document; the × button or Ctrl+W closes the tab;
+  Ctrl+Tab shows the next tab. Each tab keeps its selection. A closed tab
+  keeps its unsaved edits in the project.
 - **Canvas.** godot-uxml renders the active document from the text in the
   editor, also before a save. Select an element with a click. Shift+click
   adds an element to the selection or removes the element from the
@@ -64,8 +68,10 @@ message. Such an edit changes no file and adds no undo step.
   rows to reorder elements: a drop on the top quarter of a row goes before
   the row, on the bottom quarter after the row, on the middle into the
   row (for a container). A drag from the hierarchy to the canvas moves the
-  element into the container under the pointer. An element that godot-uxml does not know stays in the
-  tree with the mark `(unknown)` and a diagnostic.
+  element into the container under the pointer. An element that
+  godot-uxml does not know stays in the tree with the mark `(unknown)` and
+  a diagnostic. A right-click on a row opens a menu with the Edit commands
+  for the selection.
 - **Structure commands.** The **Edit** menu and the shortcuts cut, copy,
   paste, duplicate, delete, wrap in a VisualElement, unwrap, and move up
   or down. Copy takes the exact source of each element and the namespace
@@ -77,17 +83,31 @@ message. Such an edit changes no file and adds no undo step.
 - **Inspector.** Edit, add and remove attributes and inline style
   declarations. Unset style fields show the computed value and the origin
   of the value (a stylesheet, the theme, or a parent).
-- **Undo.** One history records the edits of all views.
+- **Undo.** One history records the edits of all views and all tabs.
+  An undo of an edit in another document shows the tab of that document
+  (`docs/adr/0008-tabs-and-history.md`).
 - **Save.** A save writes only the changed files. Before the write, the
   editor compares the file on disk with the version that the editor read.
   When another program changed the file, the editor asks before an
   overwrite.
-- **Diagnostics.** The panel shows godot-uxml diagnostics and the parse
-  problems of the editor.
+- **Changes on disk.** Every 2 seconds and when the window gets focus,
+  the editor compares the open files with disk. A file without unsaved
+  edits reloads. For a file with unsaved edits, the editor asks: **Reload
+  from disk** or **Keep editor text**.
+- **Recovery.** The editor writes each unsaved edit to a recovery journal
+  at once. After a crash or a killed process, the next open of the project
+  asks: **Recover** or **Discard**. A recovered file that changed on disk
+  in the meantime needs a confirmation before a save overwrites the disk
+  file (`docs/adr/0005-recovery.md`).
+- **Diagnostics.** The panel shows the diagnostics of godot-uxml (import),
+  the parse problems of the editor, unknown elements and refused edits,
+  for every open document. Filter the list by severity, file and source.
+  Select a diagnostic to select its range in the source view and its
+  element in the canvas and the hierarchy.
 
 `docs/roadmap.md` lists the next milestones: the provenance inspector,
-recovery, pseudo-state preview, the transition timeline, the
-state-machine panel and the web export.
+pseudo-state preview, the transition timeline, the state-machine panel
+and the web export.
 
 ## Screenshots
 
@@ -99,6 +119,11 @@ state-machine panel and the web export.
 | `docs/screenshots/m2-multi-select-duplicate.png` | Two buttons selected and duplicated with unique names. |
 | `docs/screenshots/m3-resize-snap.png` | A resize in progress with a snap guide; the inline width and height in the inspector. |
 | `docs/screenshots/m3-preview.png` | Preview mode with text typed in a document field. |
+| `docs/screenshots/m5-diagnostics-jump.png` | A diagnostic selected in the list: the range in the source view, the element in the canvas, the hierarchy and the inspector. |
+| `docs/screenshots/m5-tabs.png` | Two documents in tabs; the active tab has unsaved edits. |
+| `docs/screenshots/m5-recovery.png` | The recovery question after a session that ended with unsaved edits. |
+| `docs/screenshots/m5-conflict.png` | The question for a file that changed on disk and in the editor. |
+| `docs/screenshots/m5-context-menu.png` | The hierarchy context menu. |
 
 ## Requirements
 
@@ -137,7 +162,12 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
 | `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
 | `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
-| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi` or `preview`. |
+| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict` or `context-menu`. |
+| `--gdscript` | Use the GDScript path of godot-uxml (no native core). |
+| `--recovery-dir=<dir>` | Keep the recovery journals in this directory (default `user://recovery`). |
+| `--watch-interval=<seconds>` | Set the time between disk checks (default 2; 0 turns the timer off). |
+| `--ready-file=<path>` | Write this file after the options ran (tests). |
+| `--exit-after=<seconds>` | Stop the editor after this time (tests). |
 
 ## Keyboard shortcuts
 
@@ -161,6 +191,9 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | Ctrl+G, Ctrl+Shift+G | Wrap in a VisualElement, unwrap. |
 | Alt+Up, Alt+Down | Move the selection up or down among the siblings. |
 | F2 | Edit the element type in the inspector. |
+| Ctrl+W | Close the active tab. |
+| Ctrl+Tab, Ctrl+Shift+Tab | Show the next or the previous tab. |
+| Right-click (hierarchy) | Open the Edit commands for the selection. |
 
 The structure shortcuts work when no text field has the keyboard focus.
 
@@ -175,7 +208,23 @@ godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
 The second command uses the native core of godot-uxml. The third command
 uses the GDScript path. Add `--filter=<text>` to run only the tests with
 that text in the file or test name. The exit code is the number of failed
-tests.
+tests. One recovery test starts an editor in a child process and stops
+the process by its process ID.
+
+## Measure the frame cost
+
+```
+godot --headless --path . -s res://bench/frame_cost.gd
+godot --headless --path . -s res://bench/frame_cost.gd -- --gdscript
+godot --headless --path . -s res://bench/frame_cost.gd -- --fixture=large
+```
+
+The benchmark runs the editor and measures each frame for idle, hover,
+selection, typing, the commit of typing and a canvas drag. The table
+gives the median, the 95th percentile and the maximum in milliseconds,
+and the number of full renders, render patches and inspector builds of
+each scenario. `--fixture=large` uses a generated document of about 500
+elements.
 
 ## Update godot-uxml
 

@@ -129,6 +129,13 @@ func _open_journal() -> void:
 		status.emit("The recovery journal is damaged (%s) and was not used." % info["error"], true)
 		_start_journal()
 		return
+	# A file whose journaled text is the disk text has nothing to recover
+	# (a kill after the save of the file, before its `clean` record).
+	for p in info["files"].keys():
+		var r = store.read(p)
+		if r is EdError or r["buffer"].text != info["files"][p]["text"]:
+			continue
+		info["files"].erase(p)
 	if info["files"].is_empty():
 		_start_journal()
 		return

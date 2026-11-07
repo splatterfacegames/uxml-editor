@@ -11,6 +11,15 @@ extends RefCounted
 ##   resize          a resize gesture with a snap guide, mid-drag
 ##   multi           two elements selected, the Edit menu commands
 ##   preview         preview mode with a focused text field
+##   diagnostics     a diagnostic chosen in the list: the range in the
+##                   source view, the element in the canvas and hierarchy
+##   tabs            two documents in tabs, one with unsaved edits
+##   recovery        the recovery question after an unsaved session
+##   conflict        the question for a file changed on disk and in the
+##                   editor
+##   context-menu    the hierarchy context menu
+## The stages tabs, recovery and conflict work on a copy of the menu
+## fixture in user://demo-* (they write files).
 
 
 static func stage(m: EdMain, demo: String) -> void:
@@ -72,7 +81,89 @@ static func stage(m: EdMain, demo: String) -> void:
 				field.grab_focus()
 				field.text = "Runner 2"
 				field.caret_column = field.text.length()
+		"diagnostics":
+			await _frames(tree, 4)
+			for i in m._diagnostics.size():
+				var e: Dictionary = m._diagnostics[i]
+				if e["file"].ends_with(".uxml") and e["start"] >= 0:
+					var n := m.state.session.tree().element_at_offset(e["start"])
+					if n != null and n.parent != null:
+						m.shell.set_selection("diagnostics-list", [i])
+						break
+		"tabs":
+			var dir := _copy_menu("demo-tabs")
+			var f := FileAccess.open(dir + "/Assets/UI/Settings.uxml", FileAccess.WRITE)
+			f.store_string(SETTINGS)
+			f.close()
+			m.state.open_project(dir)
+			m.state.open_document("Assets/UI/Settings.uxml")
+			m.state.open_document("Assets/UI/Menu.uxml")
+			await _frames(tree, 3)
+			m.state.execute(EdUxmlCommands.set_attribute(m.state.session, EdLocator.create(_node(m, "play-button")), "text", "Play"), "demo")
+			_select(m, "play-button")
+		"recovery":
+			var dir := _copy_menu("demo-recovery")
+			var rdir := ProjectSettings.globalize_path("user://demo-recovery-journal")
+			var a := EdEditorState.new()
+			a.recovery_base = rdir
+			a.open_project(dir)
+			a.open_document("Assets/UI/Menu.uxml")
+			for n in a.session.root().walk():
+				if n.get_attribute("name") == "play-button":
+					a.execute(EdUxmlCommands.set_attribute(a.session, EdLocator.create(n), "text", "Unsaved edit"), "demo")
+			a.journal.close()
+			m.state.recovery_base = rdir
+			m.state.open_project(dir)
+		"conflict":
+			var dir := _copy_menu("demo-conflict")
+			m.state.open_project(dir)
+			await _frames(tree, 3)
+			m.state.execute(EdUxmlCommands.set_attribute(m.state.session, EdLocator.create(_node(m, "play-button")), "text", "Mine"), "demo")
+			var path := dir + "/Assets/UI/Menu.uxml"
+			var text := FileAccess.get_file_as_string(path).replace("Main Menu", "Changed by another program")
+			var f := FileAccess.open(path, FileAccess.WRITE)
+			f.store_string(text)
+			f.close()
+			m.state.check_external_changes()
+		"context-menu":
+			await _frames(tree, 3)
+			var quit := _node(m, "quit-button")
+			for row in m.shell.get_list_rows("hierarchy-tree"):
+				var it := m.shell.get_tree_item("hierarchy-tree", row.index)
+				if not it.is_empty() and int(it["id"]) == quit.id:
+					m.open_context_menu(row.get_element().get_global_rect().get_center())
 	await _frames(tree, 6)
+
+
+const SETTINGS := """<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="settings" style="padding: 12px;">
+        <ui:Label name="settings-title" text="Settings" style="font-size: 20px;" />
+        <ui:Toggle name="vsync" label="V-Sync" value="true" />
+        <ui:Slider name="volume" label="Volume" low-value="0" high-value="1" value="0.8" />
+    </ui:VisualElement>
+</ui:UXML>
+"""
+
+
+## A fresh copy of the menu fixture in user://<name>.
+static func _copy_menu(name: String) -> String:
+	var dir := ProjectSettings.globalize_path("user://" + name)
+	_copy(ProjectSettings.globalize_path("res://fixtures/projects/menu"), dir)
+	var rdir := ProjectSettings.globalize_path("user://demo-recovery-journal")
+	if name != "demo-recovery":
+		return dir
+	for d in DirAccess.get_directories_at(rdir):
+		for f in DirAccess.get_files_at(rdir + "/" + d):
+			DirAccess.remove_absolute(rdir + "/" + d + "/" + f)
+	return dir
+
+
+static func _copy(from: String, to: String) -> void:
+	DirAccess.make_dir_recursive_absolute(to)
+	for f in DirAccess.get_files_at(from):
+		DirAccess.copy_absolute(from + "/" + f, to + "/" + f)
+	for d in DirAccess.get_directories_at(from):
+		_copy(from + "/" + d, to + "/" + d)
 
 
 static func _frames(tree: SceneTree, n: int) -> void:

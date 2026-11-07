@@ -13,21 +13,28 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │ src/app/       Editor window and views                               │
-│                main.gd            composition root, shortcuts, saves │
-│                editor_state.gd    project, selection, one history    │
+│                main.gd            composition root, shortcuts, saves,│
+│                                   questions, disk watch timer        │
+│                editor_state.gd    project, tabs, selection, one      │
+│                                   history, journal, refusals         │
 │                canvas_view.gd     SubViewport, pan/zoom, overlay,    │
 │                                   handles, guides, preview input     │
 │                layout_controller  canvas gestures -> layout writes   │
 │                drag_controller    drag and drop between the views    │
 │                palette_view.gd    the library TreeView               │
 │                source_view.gd     CodeEdit, LF display copy          │
-│                inspector_view.gd  generated godot-uxml document      │
+│                inspector_view.gd  godot-uxml document, in place      │
+│                tab_bar.gd         document tabs (godot-uxml)         │
+│                diagnostics.gd     diagnostics entries and filters    │
+│                ui_util.gd         label and model updates without a  │
+│                                   layout (EdUi)                      │
 │                demo.gd            staged states for screenshots      │
 │                ui/*.uxml, *.uss   the window, authored in UXML       │
 ├───────────────────────────────────────────────────────────────────────┤
 │ src/render/    godot-uxml as the renderer                            │
-│                render_host.gd     render from buffers, element map,  │
-│                                   hit-test, computed style           │
+│                render_host.gd     render from buffers, patch of      │
+│                                   style/class, element map, hit-test,│
+│                                   computed style                     │
 │                buffer_resolver.gd unsaved buffers override disk      │
 ├───────────────────────────────────────────────────────────────────────┤
 │ src/core/      Source-backed editing (no Godot UI, headless-tested)  │
@@ -45,7 +52,8 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                uss_commands.gd    rule and inline declaration edits  │
 │                workspace.gd       buffers + one EdCommandHistory     │
 │                project_store.gd   enumerate, read, revision-checked  │
-│                                   atomic save                        │
+│                                   atomic save, quick disk check      │
+│                recovery_journal   unsaved edits as a record chain    │
 ├───────────────────────────────────────────────────────────────────────┤
 │ addons/godot_uxml/  godot-uxml, a synced copy pinned in              │
 │                     godot-uxml.pin (native DLL + GDScript path)      │
@@ -117,8 +125,15 @@ cut by clipping ancestors, holds the point (request R8). `computed_style()`
 returns the godot-uxml cascade output, with the winning origin of each
 property (request R2 for the lookup).
 
-Each buffer change renders the whole document again (request R4 asks for
-a partial reload). The theme menu selects Unity's choice (auto), the
+A change of the entry buffer that only changes the value of `style` or
+`class` attributes of rendered elements (or adds or removes such an
+attribute) does not reload: `patch()` gives the new values to the
+godot-uxml model (`UxmlElement.set_attribute()`), and godot-uxml restyles
+those elements. The check compares the source without those attributes
+(the skeleton) with the source of the last render; the same skeleton means
+the same structure, so the element map stays valid. Canvas drags, nudges
+and inline style edits take this path. Every other change renders the
+whole document again (request R4 asks for a partial reload). The theme menu selects Unity's choice (auto), the
 runtime theme, or the editor dark or light skin.
 
 ## One history
@@ -152,6 +167,12 @@ step.
 A reload from disk replaces a buffer. The history then drops the newest
 step that touches that file and every older step; newer steps touch other
 files only and stay valid.
+
+**Tabs** (ADR 0008). `EdEditorState.tabs` lists the open documents; the
+active one is `session`. Each tab keeps its selection. All tabs share the
+one history: undo and redo take the newest step of the project and show
+the tab of its document first. A closed tab keeps its edits in the
+workspace.
 
 ## Structure editing
 
@@ -241,9 +262,18 @@ the Unity editor dark skin. The toolbar is a `uie:Toolbar` with
 grid, screen size, theme) elements, the panes are `TwoPaneSplitView`
 elements, the project list and the diagnostics are `ListView` elements,
 the hierarchy and the library are `TreeView` elements, and the library
-search is a `uie:ToolbarSearchField`. The inspector is a
-second godot-uxml document that the editor generates as UXML text for each
-selection.
+search is a `uie:ToolbarSearchField`. The diagnostics filters are
+`ToolbarMenu` elements.
+
+The inspector is a second godot-uxml document. The editor generates its
+UXML once (a skeleton with fixed rows for the common attributes and style
+properties, and pairs of extra rows) and then changes it in place for each
+selection: field values and placeholders go to the `LineEdit` controls,
+row names go to fixed-size `Label` controls, unused rows are
+`visibility: hidden`. A selection change then needs no new controls and
+no layout (request R15 has the costs). The document tabs are a third,
+small godot-uxml document (`EdTabBar`), generated when the tabs change.
+The hierarchy context menu is a godot-uxml `UxmlPopupMenu`.
 
 Native Godot controls are used where godot-uxml is the wrong tool. Each
 one is mounted into a `*-host` element of the window document:
@@ -253,7 +283,8 @@ one is mounted into a `*-host` element of the window document:
 | `SubViewport` | canvas | keeps the edited document apart from the editor's own documents (theme, input, focus); pan and zoom draw the viewport texture |
 | `CodeEdit` | source view | text editing, IME, gutters and search; a godot-uxml `TextField` is a field, not a code editor |
 | `FileDialog` (native) | Open Project | the operating system folder picker |
-| `ConfirmationDialog` | save over an external change | a modal question; godot-uxml has no modal window |
+| `ConfirmationDialog` | save over an external change; recovery (Recover or Discard); a file changed on disk and in the editor (Reload or Keep) | a modal question; godot-uxml has no modal window. `EdMain.ask()` queues the questions, one dialog at a time |
+| `Control` (menu anchor) | hierarchy context menu | `UxmlPopupMenu.open()` needs an anchor control; a plain `Control` at the pointer (request R16) |
 | `EdDragController` (a `Control` over the window) | drag and drop | draws the drag label and the hierarchy drop line over the godot-uxml shell; godot-uxml has no drag-and-drop API (request R12); it ignores the mouse |
 | `EdCanvasView._draw` | selection outlines, handles, snap guides, the drop hint, the preview badge | drawn over the SubViewport texture at the canvas zoom; not document content |
 
@@ -270,12 +301,57 @@ and the editor asks before an overwrite. Otherwise the store writes a
 temporary file next to the target, renames the temporary file over the
 target, and reads the file back to check the bytes.
 
-When the window gets focus, the editor compares every file with disk. A
-clean file that changed on disk reloads. A changed file that also changed
-on disk is reported and is not overwritten without confirmation.
+When the window gets focus, and every 2 seconds on a timer
+(`--watch-interval`), the editor compares every file with disk. The timer
+check reads the size and the time of each file first
+(`EdProjectStore.may_differ()`); only a file that may have changed is read
+and hashed. A clean file that changed on disk reloads. A file with unsaved
+edits that changed on disk asks: **Reload from disk** (the unsaved edits
+of the file are lost) or **Keep editor text** (a save asks before an
+overwrite; the same disk version is not asked again).
 
-The recovery journal of ADR 0005 is not in the Godot app yet (milestone
-plan in `docs/roadmap.md`).
+## Recovery
+
+ADR 0005 has the design (section "Godot app"). `EdRecoveryJournal` writes
+one JSON line per buffer change of an unsaved file, chained by SHA-256, in
+`user://recovery/<project hash>/journal.jsonl`. At project open, a journal
+with unsaved files asks Recover or Discard, after the external-change
+check. A clean close deletes the journal.
+
+## Diagnostics
+
+`EdDiagnostics.collect()` builds the list from the files of the open tabs:
+
+| Source | Entries |
+| --- | --- |
+| godot-uxml | the diagnostics of the last render of each open document (import, cascade, runtime) |
+| editor | parse problems of the editor parsers; files that do not decode exactly; elements that godot-uxml does not know (when no render reported them); the last 20 refused edits |
+
+Each entry has a severity (error, warning, info; `severity_of()` maps the
+godot-uxml kinds, request R11), a file and a range. The panel filters by
+severity, file and source. A selection in the list opens the document of a
+UXML file in a tab, selects the element at the range (canvas, hierarchy,
+inspector) and selects the range in the source view.
+
+## Frame cost
+
+`bench/frame_cost.gd` runs the editor headless and measures the wall time
+of each frame (the headless main loop wait is off) for idle, hover,
+selection, typing, the commit of typing, and a canvas drag, on the menu
+fixture or a generated 507-element document (`--fixture=large`). Rules
+that keep a frame cheap:
+
+- Nothing renders or rebuilds on a frame without a change. The canvas
+  draws its overlay only.
+- A change of the shell (lists, menus, labels) goes through a cache
+  (`EdMain._changed()`) and skips the update when the data is the same.
+  Labels that change often have a size that does not depend on the text,
+  so `EdUi.set_label()` changes them without a layout.
+- The inspector changes its document in place.
+- A `style` or `class` change patches the render (`EdRenderHost.patch()`).
+- The source view replaces only the changed text.
+- The hierarchy keeps a map from item id to row; the hit-test tries the
+  deepest element first.
 
 ## Testing
 
@@ -302,6 +378,13 @@ godot-uxml native core.
   with a namespace declaration, unwrap, remove and move of several
   elements, the clipboard, the step composer, write targets, gesture
   math, snapping, one undo step per gesture.
+- Recovery (`test_recovery_journal.gd`, `test_app_recovery.gd`): the
+  record chain, truncation, corruption, compaction, recovery in a new
+  session, and an edit that survives a killed child editor process (the
+  test starts the process and kills it by its PID).
+- Workspace (`test_app_workspace.gd`): diagnostics filters and the jump to
+  a range, tabs with one history, the disk watch timer (reload and the
+  conflict question), the hierarchy context menu.
 - Editing in the app (`tests/unit/test_app_editing.gd`): the input goes
   through the window (`Viewport.push_input`): library insert and search,
   drag from the library to the hierarchy and the canvas, hierarchy

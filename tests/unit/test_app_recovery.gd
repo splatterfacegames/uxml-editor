@@ -156,3 +156,25 @@ func _named(s: EdEditorState, n: String) -> EdUxmlNode:
 		if x.get_attribute("name") == n:
 			return x
 	return null
+
+
+func test_a_journaled_text_equal_to_the_disk_is_not_offered() -> void:
+	var dir := copy_fixture("menu")
+	var rdir := _recovery_dir()
+	var a := EdEditorState.new()
+	a.recovery_base = rdir
+	a.open_project(dir)
+	a.open_document(MENU)
+	a.execute(EdUxmlCommands.set_attribute(a.session, EdLocator.create(_named(a, "play-button")), "text", "Saved"), "test")
+	# The file reaches the disk, then the process ends before `clean`.
+	var f := FileAccess.open(dir + "/" + MENU, FileAccess.WRITE)
+	f.store_buffer(a.workspace.buffer(MENU).to_bytes())
+	f.close()
+	a.journal.close()
+	var b := EdEditorState.new()
+	b.recovery_base = rdir
+	var found: Array = []
+	b.recovery_found.connect(func(info): found.append(info))
+	b.open_project(dir)
+	eq(found.size(), 0, "nothing to recover")
+	b.close_project()
