@@ -26,13 +26,23 @@ func test_inserts_sibling_keeping_comments_and_mixed_indentation() -> void:
 func test_converts_self_closing_parent_with_crlf_indentation() -> void:
 	var original := "<?xml version=\"1.0\"?>\r\n<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\r\n  <ui:VisualElement name=\"empty\" />\r\n</ui:UXML>\r\n"
 	var s := open_session(original)
-	var slash := original.find("/>", original.find("name=\"empty\""))
+	# The space before `/>` goes: `<ui:VisualElement name="empty">`.
+	var slash := original.find(" />", original.find("name=\"empty\""))
 	var frag := "<ui:Label text=\"New\" />"
 	var repl := ">\r\n    " + frag + "\r\n  </ui:VisualElement>"
 	var tx = EdUxmlCommands.insert_element(s, named(s, "ui:VisualElement"), 0, frag)
-	eq(tx.patches(ENTRY), [p(slash, slash + 2, repl)])
+	eq(tx.patches(ENTRY), [p(slash, slash + 3, repl)])
 	run(s, tx)
-	eq(text(s), original.substr(0, slash) + repl + original.substr(slash + 2))
+	eq(text(s), original.substr(0, slash) + repl + original.substr(slash + 3))
+	ok(text(s).contains("<ui:VisualElement name=\"empty\">\r\n"), "no space before >")
+
+
+func test_self_closing_parent_with_a_line_break_before_the_slash() -> void:
+	var original := "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement\n    name=\"tall\"\n  />\n</ui:UXML>\n"
+	var s := open_session(original)
+	var tx = EdUxmlCommands.insert_element(s, named(s, "ui:VisualElement"), 0, "<ui:Label />")
+	run(s, tx)
+	ok(text(s).contains("name=\"tall\"\n  >"), "a line break before /> stays")
 
 
 func test_inserts_into_empty_paired_parent_keeping_comment() -> void:
@@ -223,10 +233,10 @@ func test_moves_into_self_closing_destination() -> void:
 	var s := open_session(original)
 	var cs := original.find("<ui:Label")
 	var ce := cs + "<ui:Label name=\"move\" />".length()
-	var slash := original.find("/>", original.find("name=\"to\""))
+	var slash := original.find(" />", original.find("name=\"to\""))
 	var repl := ">\n    <ui:Label name=\"move\" />\n  </ui:VisualElement>"
 	var tx = EdUxmlCommands.move_element(s, with_name(s, "move"), with_name(s, "to"), 0)
-	eq(tx.patches(ENTRY), [p(cs, ce, ""), p(slash, slash + 2, repl)])
+	eq(tx.patches(ENTRY), [p(cs, ce, ""), p(slash, slash + 3, repl)])
 	run(s, tx)
 	eq(s.root().children[1].children[0].name, "ui:Label")
 

@@ -34,7 +34,7 @@ const COMMON_STYLES := [
 ## Extra rows (attributes and declarations outside the common lists) come
 ## in blocks of this size. Unused rows of a shown block are invisible, so
 ## most selection changes need no layout.
-const POOL_STEP := 4
+const POOL_STEP := 2
 
 var doc: UxmlDocument
 var _session: EdDocumentSession = null
@@ -125,11 +125,9 @@ func _view() -> Dictionary:
 		return v
 	var n := _node
 	var src := _session.source()
-	v["title"] = n.local
-	v["prefix"] = "" if n.prefix.is_empty() else n.prefix + ":"
 	var authored = n.get_attribute("name")
-	v["name"] = "" if authored == null else "#" + String(authored)
-	var sub := "%s  ·  line %d" % [_session.entry_path.get_file(), src.substr(0, n.open_start).count("\n") + 1]
+	v["title"] = n.local + ("" if authored == null else "   #" + String(authored))
+	var sub := "%s  ·  %s  ·  line %d" % [n.name, _session.entry_path.get_file(), src.substr(0, n.open_start).count("\n") + 1]
 	if _count > 1:
 		sub += "  ·  +%d more selected" % (_count - 1)
 	v["subtitle"] = sub

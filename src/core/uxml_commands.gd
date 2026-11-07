@@ -379,7 +379,15 @@ static func _plan_self_closing(src: String, parent: EdUxmlNode, fragment: String
 		inner = "%s</%s>" % [fragment, parent.name]
 	else:
 		inner = "%s%s%s%s%s</%s>" % [f["newline"], f["child_indent"], fragment, f["newline"], f["parent_indent"], parent.name]
-	return EdSourcePatch.make(slash, parent.open_end, ">" + inner)
+	# `<VisualElement />` becomes `<VisualElement>`, not `<VisualElement >`:
+	# the spaces before `/>` go too. White space with a line break stays
+	# (a `/>` on its own line becomes a `>` on its own line).
+	var start := slash
+	while start > parent.open_start and (src[start - 1] == " " or src[start - 1] == "\t"):
+		start -= 1
+	if src[start - 1] == "\n" or src[start - 1] == "\r":
+		start = slash
+	return EdSourcePatch.make(start, parent.open_end, ">" + inner)
 
 
 static func _plan_paired(src: String, parent: EdUxmlNode, index: int, fragment: String, children: Array) -> Variant:

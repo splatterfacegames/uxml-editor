@@ -108,7 +108,7 @@ func test_insert_new_element_picks_a_free_prefix_and_default_namespace() -> void
 	var plain := "<UXML xmlns=\"UnityEngine.UIElements\"><VisualElement /></UXML>"
 	var s2 := open_session(plain)
 	run(s2, EdStructureCommands.insert_new_element(s2, named(s2, "VisualElement"), 0, "Label", EdElementCatalog.RUNTIME))
-	eq(text(s2), "<UXML xmlns=\"UnityEngine.UIElements\"><VisualElement ><Label /></VisualElement></UXML>", "the default namespace needs no prefix; the space before /> stays")
+	eq(text(s2), "<UXML xmlns=\"UnityEngine.UIElements\"><VisualElement><Label /></VisualElement></UXML>", "the default namespace needs no prefix; the space before /> goes")
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +233,7 @@ func test_paste_adds_missing_namespaces_and_refuses_conflicts() -> void:
 	if not is_tx(tx):
 		return
 	run(dest, tx)
-	eq(text(dest), "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\"><ui:VisualElement ><uie:ToolbarButton text=\"A\" xmlns:uie=\"UnityEditor.UIElements\" /></ui:VisualElement></ui:UXML>")
+	eq(text(dest), "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\"><ui:VisualElement><uie:ToolbarButton text=\"A\" xmlns:uie=\"UnityEditor.UIElements\" /></ui:VisualElement></ui:UXML>")
 	var clash := open_session("<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" xmlns:uie=\"Other\"><ui:VisualElement /></ui:UXML>")
 	is_error(EdClipboard.paste(clash, named(clash, "ui:VisualElement"), 0, p), "illegal-hierarchy")
 
