@@ -1,0 +1,245 @@
+/* Inspector document (a generated skeleton, updated in place). */
+
+.hidden {
+    display: none;
+}
+
+/* Keeps its space: a visibility change needs no layout. */
+.invisible {
+    visibility: hidden;
+}
+
+.inspector {
+    flex-grow: 1;
+    background-color: rgb(56, 56, 56);
+}
+
+/* Over the (invisible) content. */
+.empty {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    margin: 12px;
+    color: rgb(160, 160, 160);
+    white-space: normal;
+}
+
+/* The labels that change per selection have a fixed height and stretch
+   across the column of the ScrollView, so a new text needs no layout
+   (godot-uxml "Text changes and the layout"). */
+.title {
+    height: 24px;
+    padding-left: 8px;
+    padding-top: 6px;
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: rgb(230, 230, 230);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.subtitle {
+    height: 18px;
+    color: rgb(140, 140, 140);
+    padding-left: 8px;
+    margin-bottom: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.section {
+    margin-top: 2px;
+    border-top-width: 1px;
+    border-top-color: rgb(36, 36, 36);
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+    padding-right: 4px;
+}
+
+.field {
+    flex-grow: 1;
+    flex-shrink: 1;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.type-field > .unity-label {
+    min-width: 146px;
+    width: 146px;
+}
+
+/* A long name (transition-timing-function) elides; the tooltip shows it.
+   The width is a flex-basis, so a new name needs no layout. */
+.row-label {
+    flex-basis: 45%;
+    max-width: 150px;
+    min-width: 56px;
+    flex-shrink: 0;
+    height: 18px;
+    padding-left: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -unity-text-align: middle-left;
+}
+
+.row-label.unset {
+    color: rgb(150, 150, 150);
+}
+
+.remove {
+    width: 20px;
+    height: 18px;
+    padding: 0;
+    margin-left: 2px;
+}
+
+.add-row {
+    flex-direction: row;
+    padding-right: 4px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.add-name {
+    width: 40%;
+    max-width: 156px;
+    flex-shrink: 0;
+}
+
+.add-value {
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.add-button {
+    width: 44px;
+}
+
+.hint {
+    white-space: normal;
+    color: rgb(140, 140, 140);
+    padding-left: 4px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+    -unity-font-style: italic;
+}
+
+.readout {
+    height: 18px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-left: 4px;
+    color: rgb(200, 200, 200);
+}
+
+/* Milestone 4: state preview, typed helpers, classes, declarations. */
+
+.state-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-right: 4px;
+    margin-bottom: 4px;
+}
+
+.state-toggle {
+    margin-right: 6px;
+}
+
+/* A typed helper before the value field: a menu, a unit, a swatch. */
+.helper {
+    width: 20px;
+    min-width: 20px;
+    height: 18px;
+    padding: 0;
+    margin: 1px 2px 1px 0;
+    -unity-text-align: middle-center;
+}
+
+.helper-space {
+    width: 22px;
+    min-width: 22px;
+}
+
+/* Tinted with the computed colour (a control modulate, no restyle). */
+.swatch {
+    background-color: rgb(255, 255, 255);
+    border-width: 1px;
+    border-color: rgb(25, 25, 25);
+}
+
+/* A row of a list that shows a source place: a flat button. */
+.link {
+    height: 18px;
+    margin: 1px 4px 1px 4px;
+    padding: 0 4px 0 4px;
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    -unity-text-align: middle-left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: rgb(200, 200, 200);
+}
+
+.class-name {
+    width: 120px;
+    min-width: 120px;
+    color: rgb(130, 190, 255);
+}
+
+.class-rules {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    margin-left: 0;
+}
+
+.status-winner {
+    color: rgb(140, 220, 140);
+    -unity-font-style: bold;
+}
+
+.status-overridden {
+    color: rgb(150, 150, 150);
+}
+
+.status-dropped {
+    color: rgb(230, 120, 110);
+}
+
+.status-keyword, .status-inherited, .status-default {
+    color: rgb(190, 180, 130);
+}
+
+.targets {
+    color: rgb(160, 160, 160);
+}
+
+/* Milestone 6: the easing curve of transition-timing-function. */
+.easing-row {
+    flex-direction: row;
+    align-items: center;
+    padding-right: 4px;
+}
+
+.easing-curve {
+    width: 120px;
+    height: 48px;
+    margin: 2px 4px 4px 154px;
+    background-color: rgb(42, 42, 42);
+    border-width: 1px;
+    border-color: rgb(30, 30, 30);
+}
+
+.easing-name {
+    flex-grow: 1;
+    flex-basis: 0;
+    height: 18px;
+    color: rgb(160, 160, 160);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

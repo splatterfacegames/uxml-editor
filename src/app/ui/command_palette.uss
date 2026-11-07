@@ -1,0 +1,91 @@
+/* Command palette and shortcut map (EdCommandPalette), over the window. */
+
+.cp-backdrop {
+    flex-grow: 1;
+    align-items: center;
+    background-color: rgba(0, 0, 0, 0.35);
+}
+
+.cp-panel {
+    width: 640px;
+    max-width: 90%;
+    height: 420px;
+    margin-top: 72px;
+    padding: 8px;
+    background-color: rgb(46, 46, 46);
+    border-width: 1px;
+    border-color: rgb(20, 20, 20);
+    border-radius: 4px;
+}
+
+.cp-header {
+    flex-direction: row;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.cp-title {
+    flex-grow: 1;
+    flex-basis: 0;
+    -unity-font-style: bold;
+    color: rgb(222, 222, 222);
+    -unity-text-align: middle-left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cp-count {
+    width: 120px;
+    color: rgb(140, 140, 140);
+    -unity-text-align: middle-right;
+}
+
+.cp-search {
+    flex-shrink: 0;
+    margin: 4px 0 6px 0;
+}
+
+.cp-list {
+    flex-grow: 1;
+    background-color: rgb(40, 40, 40);
+}
+
+.cp-hint {
+    height: 20px;
+    flex-shrink: 0;
+    margin-top: 4px;
+    color: rgb(140, 140, 140);
+    -unity-text-align: middle-left;
+}
+
+.cp-row {
+    flex-direction: row;
+    flex-grow: 1;
+    align-items: center;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.cp-category {
+    width: 84px;
+    color: rgb(140, 140, 140);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cp-name {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    color: rgb(214, 214, 214);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cp-keys {
+    width: 190px;
+    color: rgb(129, 180, 255);
+    -unity-text-align: middle-right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <Style src="command_palette.uss" />
+    <ui:VisualElement name="cp-backdrop" class="cp-backdrop">
+        <ui:VisualElement name="cp-panel" class="cp-panel">
+            <ui:VisualElement class="cp-header">
+                <ui:Label name="cp-title" class="cp-title" text="Commands" />
+                <ui:Label name="cp-count" class="cp-count" text=" " />
+            </ui:VisualElement>
+            <ui:TextField name="cp-search" class="cp-search" is-delayed="true" placeholder-text="Type to search the commands" />
+            <ui:ListView name="cp-list" class="cp-list" fixed-item-height="22" selection-type="Single" item-template="command_row.uxml" />
+            <ui:Label name="cp-hint" class="cp-hint" text="Up and Down choose. Enter runs. Escape closes." />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

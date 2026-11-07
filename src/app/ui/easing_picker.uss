@@ -1,0 +1,44 @@
+/* The easing picker (EdEasingPicker): a grid of curves. */
+
+.grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 6px;
+    background-color: rgb(48, 48, 48);
+    flex-grow: 1;
+}
+
+.cell {
+    width: 100px;
+    height: 66px;
+    margin: 2px;
+    border-width: 1px;
+    border-color: rgb(30, 30, 30);
+    border-radius: 3px;
+    background-color: rgb(40, 40, 40);
+}
+
+.cell.current {
+    border-color: rgb(220, 180, 80);
+}
+
+.curve {
+    flex-grow: 1;
+}
+
+.name {
+    height: 18px;
+    margin: 0;
+    padding: 0 2px 0 2px;
+    border-width: 0;
+    background-color: rgba(0, 0, 0, 0);
+    font-size: 10px;
+    -unity-text-align: middle-center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.extra {
+    height: 20px;
+    margin: 0 8px 6px 8px;
+}

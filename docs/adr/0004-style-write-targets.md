@@ -1,5 +1,24 @@
 # ADR 0004: Style Write Targets
 
+> **Status: accepted, implemented in the Godot app (milestone 4).** Style
+> targets (`EdUssCommands.inline_target`, `rule_target`, `new_rule_target`)
+> freeze the source and the exact spans, and a stale commit is refused.
+> The inspector derives the valid targets from the godot-uxml cascade
+> candidates (`explain_style`, request R5) in `EdStyleTargets`: the
+> authored rules that apply with the same pseudo-states, the inline style
+> (no state), and a new `#name` or `.class` rule in each stylesheet of the
+> document. One valid target commits at once; more open a picker. The
+> choice stays for the property until the selection or the state preview
+> changes. Theme, inherited and default values have no authored
+> destination and are never offered. Milestone 3 canvas gestures
+> (`EdLayoutCommands`) still write each layout property to the declaration
+> that wins (or a new inline declaration for a theme or default value)
+> without a picker; a pseudo-state winner and an overridden longhand are
+> refused there. The `evidence` (measured/documented) labels below came
+> from `uxml-preview`; godot-uxml theme values are all measured in Unity
+> 6000.3.
+
+
 ## Decision
 
 Inspector style edits are written to an explicit, user-visible destination —
@@ -8,6 +27,16 @@ chosen by a target picker whenever more than one destination is valid. The
 chosen target is frozen against the selection it was computed for, and a
 commit arriving after the session or selection moved on is refused rather
 than redirected.
+
+The Godot editor extends this decision to gestures. A canvas drag or a
+timeline bar drag writes to the remembered choice or the only valid target.
+When more than one target is valid and none is remembered, the gesture
+writes to the winner (else the inline style, else the first target), so the
+canvas shows the real render, and the picker asks at the end of the gesture.
+Another target gets the end value in place of the writes of the gesture, as
+one undo step. Cancel undoes the gesture. A timeline edit during a run also
+offers the targets without states: the rule that gives the running
+transition can have no pseudo-state.
 
 ## Evidence
 

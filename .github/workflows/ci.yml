@@ -1,123 +1,66 @@
 name: CI
 
+# The headless suite of the Godot editor (milestone 8): the GDScript path of
+# godot-uxml on Linux, both paths on Windows (the native core is a Windows
+# DLL). godot-uxml is a byte-exact copy in addons/godot_uxml at the commit of
+# godot-uxml.pin (ADR 0007): the checkout has every file, and the first step
+# checks the copy against the hash in the pin.
+
 on:
   push:
-    branches: [main]
+    branches: [godot]
   pull_request:
+    branches: [godot]
   workflow_dispatch:
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
-  CARGO_TERM_COLOR: always
+  GODOT_VERSION: 4.7.1
 
 jobs:
-  web:
-    name: Web (typecheck, unit, e2e, build)
-    # sg-uxml-editor on stadia-testbed: rustup/stable, setup-node, webkit2gtk,
-    # jq, pwsh, and Chrome are provisioned on the box.
-    runs-on: [self-hosted, linux, x64]
+  linux:
+    name: Linux (GDScript path)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Authenticate private shared-stack dependency
-        shell: bash
-        env:
-          UXML_EDITOR_SHARED_STACK_READ_TOKEN: ${{ secrets.UXML_EDITOR_SHARED_STACK_READ_TOKEN }}
-          UXML_EDITOR_SHARED_STACK_DEPLOY_KEY: ${{ secrets.UXML_EDITOR_SHARED_STACK_DEPLOY_KEY }}
-        run: bash scripts/configure-shared-stack-auth.sh
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      # No cache: on setup-node — its post-job npm-cache save uploads to the
-      # actions cache service, which intermittently stalls on this box's Azure
-      # egress (observed: >20 min in post steps). npm ci is fast enough without
-      # it; the git dependency dominates install time regardless.
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      # The box has no passwordless sudo contract, so install the browser only;
-      # Chrome's provisioned system libraries already satisfy it.
-      - run: npx playwright install chromium
-      - run: npm run test:e2e
-      - run: npm run build
-      - run: npm run check:licenses
-      # Visual baselines are platform-specific; CI generates missing -linux
-      # snapshots (updateSnapshots: 'missing') and this artifact carries them
-      # back so they can be reviewed and committed. Diffs from failed
-      # comparisons land in the test-results directory.
-      - uses: actions/upload-artifact@v4
-        continue-on-error: true
-        if: always()
-        with:
-          name: visual-snapshots
-          path: |
-            tests/e2e/visual.spec.ts-snapshots
-            node_modules/.cache/playwright-test-results
-          if-no-files-found: ignore
-      # stadia-testbed's Azure egress intermittently stalls large uploads; the
-      # dist bundle is reproducible, so never fail the leg on an upload stall.
-      - uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: browser-build
-          path: dist
-          if-no-files-found: error
-
-  host-linux:
-    name: 'Host (Linux: fmt, clippy, tests)'
-    runs-on: [self-hosted, linux, x64]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          # PR runs restore the cache but never save: the post-job cache
-          # upload stalls on stadia-testbed's Azure egress. Main pushes keep
-          # the cache warm without gating pull requests on the upload.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install Tauri system dependencies
-        # The self-hosted box already ships webkit2gtk; keep the install for a
-        # hypothetical github-hosted fallback only.
-        if: runner.environment == 'github-hosted'
+      - name: Check the godot-uxml copy against the pin
+        run: python3 tools/update_godot_uxml.py --verify
+      - name: Download Godot
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-            librsvg2-dev libjavascriptcoregtk-4.1-dev pkg-config
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          chmod +x godot
+          ./godot --version
+      - name: Import
+        # The first import after a checkout can crash (exit 139, also on
+        # godot-uxml); a second import passes.
+        run: ./godot --headless --path . --import || ./godot --headless --path . --import
+      - name: Tests (GDScript path)
+        run: ./godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
 
-  host-windows:
-    name: 'Host (Windows: tests, desktop build)'
-    # GitHub-hosted: there is no self-hosted Windows runner. When org Actions
-    # quota is exhausted this job queues without starting — in that state the
-    # native-Windows verification in the PR body is the authoritative evidence.
+  windows:
+    name: Windows (native and GDScript paths)
     runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Authenticate private shared-stack dependency
-        shell: bash
-        env:
-          UXML_EDITOR_SHARED_STACK_READ_TOKEN: ${{ secrets.UXML_EDITOR_SHARED_STACK_READ_TOKEN }}
-          UXML_EDITOR_SHARED_STACK_DEPLOY_KEY: ${{ secrets.UXML_EDITOR_SHARED_STACK_DEPLOY_KEY }}
-        run: bash scripts/configure-shared-stack-auth.sh
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - run: npm ci
-      # Windows is the only platform where conditional replacement is
-      # implemented, so it is the only one that proves the atomic-save contract.
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: npm run build
-      - run: npx tauri build --no-bundle
+      - name: Check the godot-uxml copy against the pin
+        run: python tools/update_godot_uxml.py --verify
+      - name: Download Godot
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+          unzip -q godot.zip
+          # The console wrapper starts the exe of the same name without
+          # "_console": keep both names.
+          echo "GODOT=./Godot_v${GODOT_VERSION}-stable_win64_console.exe" >> "$GITHUB_ENV"
+          "./Godot_v${GODOT_VERSION}-stable_win64_console.exe" --version
+      - name: Import
+        run: $GODOT --headless --path . --import || $GODOT --headless --path . --import
+      - name: Tests (native core)
+        run: $GODOT --headless --path . -s res://tests/run_tests.gd
+      - name: Tests (GDScript path)
+        run: $GODOT --headless --path . -s res://tests/run_tests.gd -- --gdscript

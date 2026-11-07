@@ -1,0 +1,295 @@
+/* Editor window layout. Colours and control looks come from the godot-uxml
+   Unity editor dark skin; this sheet adds layout and the editor accents. */
+
+.window {
+    --accent: rgb(58, 121, 187);
+    --panel-border: rgb(25, 25, 25);
+    --header-bg: rgb(52, 52, 52);
+}
+
+.window {
+    flex-grow: 1;
+    background-color: rgb(40, 40, 40);
+}
+
+.grow {
+    flex-grow: 1;
+}
+
+.main-toolbar {
+    flex-shrink: 0;
+}
+
+#preset-menu {
+    min-width: 150px;
+}
+
+#theme-menu {
+    min-width: 120px;
+}
+
+.zoom-label {
+    width: 44px;
+    -unity-text-align: middle-center;
+    align-self: center;
+}
+
+.document-label {
+    align-self: center;
+    margin-right: 8px;
+    color: rgb(170, 170, 170);
+}
+
+.panel {
+    flex-grow: 1;
+    background-color: rgb(56, 56, 56);
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-color: var(--panel-border);
+    overflow: hidden;
+}
+
+.panel-header {
+    height: 21px;
+    padding-left: 8px;
+    -unity-text-align: middle-left;
+    -unity-font-style: bold;
+    background-color: var(--header-bg);
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+    flex-shrink: 0;
+}
+
+.panel-header-row {
+    flex-direction: row;
+    flex-shrink: 0;
+    background-color: var(--header-bg);
+    border-bottom-width: 1px;
+    border-bottom-color: var(--panel-border);
+}
+
+.panel-header-row > .panel-header {
+    border-bottom-width: 0;
+}
+
+.source-file-menu {
+    min-width: 200px;
+}
+
+/* Labels that the editor updates often have a size that does not depend
+   on the text (flex-basis 0 or a fixed width). godot-uxml then changes
+   the text without a layout of the window (request R15). */
+.source-state {
+    -unity-text-align: middle-left;
+    color: rgb(170, 170, 170);
+    margin-left: 6px;
+    flex-basis: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.panel-list {
+    background-color: rgb(48, 48, 48);
+}
+
+/* A long row elides; the tooltip has the whole text. */
+.panel-list .unity-label {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.panel-list .unity-tree-view__item-content {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    overflow: hidden;
+}
+
+.host {
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.status-bar {
+    flex-direction: row;
+    height: 22px;
+    flex-shrink: 0;
+    background-color: rgb(32, 32, 32);
+    border-top-width: 1px;
+    border-top-color: var(--panel-border);
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.status-label {
+    -unity-text-align: middle-left;
+    color: rgb(180, 180, 180);
+}
+
+.status-message {
+    flex-grow: 1;
+    flex-basis: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.history-label {
+    width: 420px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -unity-text-align: middle-right;
+    padding-right: 8px;
+}
+
+.status-label.error {
+    color: rgb(240, 120, 110);
+}
+
+.palette-search {
+    margin-left: 6px;
+    margin-right: 4px;
+    align-self: center;
+}
+
+#grid-menu {
+    min-width: 80px;
+}
+
+.tabs-host {
+    flex-grow: 0;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.diagnostics-header {
+    width: 120px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.diag-menu {
+    min-width: 60px;
+    flex-shrink: 1;
+}
+
+/* Milestone 6: the transition timeline. */
+.timeline-header {
+    width: 76px;
+    flex-shrink: 0;
+}
+
+.tl-button {
+    width: 28px;
+    -unity-text-align: middle-center;
+}
+
+.tl-speed {
+    min-width: 52px;
+}
+
+/* Changes during playback: a fixed width, so no layout per frame. */
+.tl-time {
+    width: 112px;
+    flex-shrink: 0;
+    -unity-text-align: middle-center;
+    color: rgb(200, 200, 200);
+    overflow: hidden;
+}
+
+.tl-caption {
+    -unity-text-align: middle-center;
+    color: rgb(170, 170, 170);
+    margin-left: 4px;
+    margin-right: 2px;
+}
+
+/* A narrow timeline (the state-machine panel is open): the header wraps, and
+   the From and To fields keep a readable width. */
+.timeline-bar {
+    flex-wrap: wrap;
+}
+
+.tl-cond {
+    width: 180px;
+    min-width: 120px;
+    flex-shrink: 1;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.tl-cond-menu {
+    min-width: 18px;
+    width: 18px;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.tl-scope {
+    min-width: 84px;
+    margin-left: 6px;
+}
+
+.tl-info {
+    flex-grow: 1;
+    flex-basis: 0;
+    margin-left: 6px;
+    -unity-text-align: middle-left;
+    color: rgb(160, 160, 160);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tl-tracks {
+    background-color: rgb(44, 44, 44);
+}
+
+/* Milestone 7: the state-machine panel. */
+.hidden {
+    display: none;
+}
+
+.states-closed > #unity-dragline-anchor {
+    display: none;
+}
+
+.sm-header {
+    width: 58px;
+    flex-shrink: 0;
+}
+
+.sm-target {
+    flex-grow: 1;
+    flex-basis: 0;
+    -unity-text-align: middle-left;
+    color: rgb(170, 170, 170);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sm-graph {
+    background-color: rgb(44, 44, 44);
+}
+
+.sm-info-row {
+    flex-direction: row;
+    flex-shrink: 0;
+    height: 18px;
+    background-color: var(--header-bg);
+    border-top-width: 1px;
+    border-top-color: var(--panel-border);
+}
+
+.sm-info {
+    flex-grow: 1;
+    flex-basis: 0;
+    padding-left: 6px;
+    -unity-text-align: middle-left;
+    color: rgb(180, 180, 180);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

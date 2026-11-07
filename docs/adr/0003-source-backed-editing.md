@@ -1,5 +1,14 @@
 # ADR 0003: Source-Backed Editing
 
+> **Status: accepted, still applies.** The Godot app keeps the decision.
+> The evidence moved: `src/core/source_patch.gd` validates patch sets,
+> `tests/unit/test_round_trip.gd` opens and saves all 211 fixtures
+> byte-identical, and the ported command suites in `tests/unit/` check the
+> exact patches and the non-mutation of refused edits. Offsets are now
+> Godot String code points, so the UTF-16 surrogate checks have no
+> equivalent. Document tabs share the one history (ADR 0008).
+
+
 ## Decision
 
 Every authoring operation edits the source text directly as a localized

@@ -1,0 +1,54 @@
+/* Document tabs over the canvas (EdTabBar). */
+
+.tab-bar {
+    flex-direction: row;
+    flex-grow: 1;
+    height: 24px;
+    background-color: rgb(40, 40, 40);
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(26, 26, 26);
+    overflow: hidden;
+}
+
+.tab {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 1;
+    height: 24px;
+    padding-left: 2px;
+    padding-right: 2px;
+    border-right-width: 1px;
+    border-right-color: rgb(26, 26, 26);
+    background-color: rgb(48, 48, 48);
+}
+
+.tab.active {
+    background-color: rgb(60, 60, 60);
+    border-top-width: 2px;
+    border-top-color: rgb(74, 153, 255);
+}
+
+.tab-button {
+    height: 20px;
+    margin: 0;
+    padding-left: 8px;
+    padding-right: 6px;
+    border-width: 0;
+    background-color: rgba(0, 0, 0, 0);
+    -unity-text-align: middle-left;
+}
+
+.tab-close {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    padding: 0;
+    border-width: 0;
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.tab-empty {
+    color: rgb(150, 150, 150);
+    padding-left: 8px;
+    -unity-text-align: middle-left;
+}
