@@ -44,7 +44,17 @@ func list_files() -> Array:
 	return out
 
 
-func _scan(rel_dir: String, out: Array, depth: int) -> void:
+## Project-relative paths of every file with one of the extensions
+## `exts` (lower case, no dot), sorted. The same folders are skipped as
+## for list_files().
+func list_assets(exts: Array) -> Array:
+	var out: Array = []
+	_scan("", out, 0, exts)
+	out.sort()
+	return out
+
+
+func _scan(rel_dir: String, out: Array, depth: int, exts: Array = EXTENSIONS) -> void:
 	if depth > 32:
 		return
 	var abs_dir := root if rel_dir.is_empty() else root + "/" + rel_dir
@@ -54,12 +64,12 @@ func _scan(rel_dir: String, out: Array, depth: int) -> void:
 	d.include_hidden = false
 	d.include_navigational = false
 	for f in d.get_files():
-		if EXTENSIONS.has(f.get_extension().to_lower()):
+		if exts.has(f.get_extension().to_lower()):
 			out.append(f if rel_dir.is_empty() else rel_dir + "/" + f)
 	for sub in d.get_directories():
 		if sub.begins_with(".") or SKIP_DIRS.has(sub):
 			continue
-		_scan(sub if rel_dir.is_empty() else rel_dir + "/" + sub, out, depth + 1)
+		_scan(sub if rel_dir.is_empty() else rel_dir + "/" + sub, out, depth + 1, exts)
 
 
 func exists(rel: String) -> bool:

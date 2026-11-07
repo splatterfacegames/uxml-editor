@@ -132,6 +132,9 @@ func test_inline_style_from_inspector() -> void:
 		if m.inspector._fields[f]["kind"] == "style" and m.inspector._fields[f]["name"] == "font-size" and not f.begins_with("remove-"):
 			field = f
 	m.inspector._on_value_changed(field, "32px")
+	# Two valid targets (inline, a new #menu-title rule): the picker asks.
+	eq(m.inspector.pending_labels(), ["Inline style", "New rule #menu-title in Menu.uss"])
+	ok(m.inspector.choose_id("inline"))
 	await _frames()
 	ok(m.state.workspace.text(MENU).contains("<ui:Label name=\"menu-title\" text=\"Main Menu\" style=\"font-size: 32px;\" />"), "inline style attribute added")
 	var title := _node_named(m, "menu-title")

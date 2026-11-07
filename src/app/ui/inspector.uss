@@ -124,3 +124,88 @@
     padding-left: 4px;
     color: rgb(200, 200, 200);
 }
+
+/* Milestone 4: state preview, typed helpers, classes, declarations. */
+
+.state-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-right: 4px;
+    margin-bottom: 4px;
+}
+
+.state-toggle {
+    margin-right: 6px;
+}
+
+/* A typed helper before the value field: a menu, a unit, a swatch. */
+.helper {
+    width: 20px;
+    min-width: 20px;
+    height: 18px;
+    padding: 0;
+    margin: 1px 2px 1px 0;
+    -unity-text-align: middle-center;
+}
+
+.helper-space {
+    width: 22px;
+    min-width: 22px;
+}
+
+/* Tinted with the computed colour (a control modulate, no restyle). */
+.swatch {
+    background-color: rgb(255, 255, 255);
+    border-width: 1px;
+    border-color: rgb(25, 25, 25);
+}
+
+/* A row of a list that shows a source place: a flat button. */
+.link {
+    height: 18px;
+    margin: 1px 4px 1px 4px;
+    padding: 0 4px 0 4px;
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    -unity-text-align: middle-left;
+    overflow: hidden;
+    color: rgb(200, 200, 200);
+}
+
+.class-name {
+    width: 124px;
+    min-width: 124px;
+    color: rgb(130, 190, 255);
+}
+
+.class-rules {
+    flex-grow: 1;
+    flex-shrink: 1;
+    margin-left: 0;
+}
+
+.prov {
+    flex-shrink: 0;
+}
+
+.status-winner {
+    color: rgb(140, 220, 140);
+    -unity-font-style: bold;
+}
+
+.status-overridden {
+    color: rgb(150, 150, 150);
+}
+
+.status-dropped {
+    color: rgb(230, 120, 110);
+}
+
+.status-keyword, .status-inherited, .status-default {
+    color: rgb(190, 180, 130);
+}
+
+.targets {
+    color: rgb(160, 160, 160);
+}

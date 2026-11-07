@@ -12,19 +12,19 @@ extends RefCounted
 ## apply a `text` change of the model to a Label (request R15).
 
 
-## Set the text of a fixed-size Label `element_name` of `doc`. Returns
-## false when the text did not change.
+## Set the text of a fixed-size Label or Button `element_name` of `doc`.
+## Returns false when the text did not change.
 static func set_label(doc: UxmlDocument, element_name: String, text: String) -> bool:
-	var c := doc.get_native(element_name) as Label
-	if c == null:
+	var c := doc.get_native(element_name)
+	if not (c is Label or c is Button):
 		return false
-	if c.text == text and not c.has_meta("uxml_full_text"):
+	if String(c.get("text")) == text and not c.has_meta("uxml_full_text"):
 		return false
 	set_silent(doc, element_name, "text", text)
 	if c.has_meta("uxml_full_text"):
 		c.remove_meta("uxml_full_text")
 		c.remove_meta("uxml_elided")
-	c.text = text
+	c.set("text", text)
 	return true
 
 

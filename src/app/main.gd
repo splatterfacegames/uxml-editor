@@ -159,6 +159,10 @@ func _ready() -> void:
 	source.undo_requested.connect(_undo)
 	source.redo_requested.connect(_redo)
 	inspector.command.connect(func(r, origin): state.execute(r, origin))
+	inspector.jump_requested.connect(show_source_range)
+	inspector.select_requested.connect(func(id): state.select_id(id, "inspector"))
+	inspector.states_changed.connect(func(_id, _s): canvas.queue_redraw())
+	inspector.asset_lister = func(exts: Array) -> Array: return state.store.list_assets(exts) if state.has_project() else []
 	state.project_opened.connect(_on_project_opened)
 	state.document_opened.connect(_on_document_opened)
 	state.selection_changed.connect(_on_selection_changed)
@@ -982,6 +986,17 @@ func _set_diag_filter(key: String, value: String, menu: String, text: String) ->
 	diag_filter[key] = value
 	_set_menu_text(menu, text)
 	_refresh_diagnostics()
+
+
+## Show range [start, end) of project file `path` in the source view (a
+## declaration of the inspector's provenance list).
+func show_source_range(path: String, start: int, end: int) -> void:
+	if not state.workspace.has(path):
+		return
+	source.flush()
+	if source_path != path:
+		_show_source(path)
+	source.mark_range(start, maxi(end, start + 1))
 
 
 ## Show diagnostic `e`: its file in the source view with the range

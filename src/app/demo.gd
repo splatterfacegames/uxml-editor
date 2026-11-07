@@ -18,6 +18,11 @@ extends RefCounted
 ##   conflict        the question for a file changed on disk and in the
 ##                   editor
 ##   context-menu    the hierarchy context menu
+##   provenance      the declarations of background-color: the winning
+##                   rule, the theme value it overrides, the source range
+##   picker          the write-target picker of a min-width edit
+##   states          the :hover state forced on a button, its rule wins
+##   classes         the class editor with the rules of each class
 ## The stages tabs, recovery and conflict work on a copy of the menu
 ## fixture in user://demo-* (they write files).
 
@@ -121,6 +126,40 @@ static func stage(m: EdMain, demo: String) -> void:
 			await _frames(tree, 3)
 			var quit := _node(m, "quit-button")
 			m.open_context_menu(await _row_center(m, "hierarchy-tree", _tree_index(m, quit.id)))
+		"provenance":
+			_select(m, "play-button")
+			await _frames(tree, 3)
+			m.inspector.show_property("background-color")
+			m.inspector.flush()
+			m.inspector.open_provenance(0)
+			await _frames(tree, 2)
+			m.inspector.doc.scroll_to("scroll", "prov-section")
+		"picker":
+			_select(m, "play-button")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			var i := EdInspectorView.COMMON_STYLES.find("min-width")
+			m.inspector.doc.scroll_to("scroll", "row-style-%d" % i)
+			await _frames(tree, 3)
+			m.inspector.show_property("min-width")
+			m.inspector.flush()
+			m.inspector.write_style("min-width", "200px", m.inspector.doc.get_native("style-%d" % i))
+		"states":
+			var t = EdUssCommands.new_rule_target(m.state.workspace, "Assets/UI/Menu.uss", ".menu-button:hover", "background-color")
+			m.state.execute(EdUssCommands.insert_rule(m.state.workspace, t, "#c0392b"), "demo")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			m.inspector.set_state("hover", true)
+			m.inspector.show_property("background-color")
+			await _frames(tree, 3)
+			m.inspector.flush()
+			m.inspector.doc.scroll_to("scroll", "prov-section")
+		"classes":
+			_select(m, "play-button")
+			await _frames(tree, 3)
+			m.inspector.flush()
 	await _frames(tree, 6)
 
 

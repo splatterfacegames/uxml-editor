@@ -230,7 +230,8 @@ func _map(tree: EdUxmlSource, model: UxmlDocumentModel) -> void:
 		by_offset[el.open_tag_start] = el
 	for n in tree.nodes:
 		var el = by_offset.get(n.open_start)
-		if el != null and el.tag() == n.name:
+		# An <Instance> is a TemplateContainer in the godot-uxml model.
+		if el != null and (el.tag() == n.name or (n.local == "Instance" and el.local == "TemplateContainer")):
 			element_for_node[n.id] = el
 			node_for_element[el] = n.id
 
