@@ -66,6 +66,18 @@ func _make_doc() -> void:
 	add_child(doc)
 
 
+## Show nothing (the last tab closed).
+func clear() -> void:
+	_make_doc()
+	element_for_node.clear()
+	node_for_element.clear()
+	_hit_order = []
+	_tree = null
+	_skeleton = ""
+	diagnostics = []
+	entry_path = ""
+
+
 ## The document fills the viewport through its anchors.
 func set_screen_size(s: Vector2i) -> void:
 	size = s

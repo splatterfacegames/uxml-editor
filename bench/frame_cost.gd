@@ -62,6 +62,7 @@ func _run() -> void:
 	OS.low_processor_usage_mode_sleep_usec = 0
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	_dir = ProjectSettings.globalize_path("user://bench-%d" % Time.get_ticks_usec())
+	EdEditorState.default_recovery_base = _dir + "-recovery"
 	var entry := MENU
 	if fixture == "large":
 		entry = _make_large(_dir)
@@ -133,6 +134,7 @@ func _run() -> void:
 	_m.queue_free()
 	await _wait(2)
 	_rm(_dir)
+	_rm(_dir + "-recovery")
 	quit(0)
 
 

@@ -3,7 +3,8 @@
   The editor window. godot-uxml renders this document with the Unity
   editor dark skin. Native Godot controls go into the *-host elements:
   the canvas (a SubViewport), the source view (CodeEdit) and the inspector
-  (a second godot-uxml document made for each selection).
+  (a second godot-uxml document, updated in place) and the document tabs
+  (a small godot-uxml document of its own).
 -->
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
   <Style src="editor_shell.uss" />
@@ -54,6 +55,7 @@
       <ui:TwoPaneSplitView name="right-split" fixed-pane-index="1" fixed-pane-initial-dimension="340">
         <ui:TwoPaneSplitView name="center-split" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="280">
           <ui:VisualElement class="panel">
+            <ui:VisualElement name="tabs-host" class="host tabs-host" />
             <ui:Label name="canvas-header" class="panel-header" text="Canvas" />
             <ui:VisualElement name="canvas-host" class="host grow" />
           </ui:VisualElement>
@@ -63,10 +65,15 @@
               <uie:ToolbarMenu name="source-file-menu" class="source-file-menu" text="(no file)" tooltip="File shown in the source view" />
               <ui:Label name="source-state" class="source-state grow" text="" />
             </ui:VisualElement>
-            <ui:TwoPaneSplitView name="source-split" fixed-pane-index="1" fixed-pane-initial-dimension="300" class="grow">
+            <ui:TwoPaneSplitView name="source-split" fixed-pane-index="1" fixed-pane-initial-dimension="440" class="grow">
               <ui:VisualElement name="source-host" class="host" />
               <ui:VisualElement class="panel">
-                <ui:Label name="diagnostics-header" class="panel-header" text="Diagnostics" />
+                <ui:VisualElement class="panel-header-row">
+                  <ui:Label name="diagnostics-header" class="panel-header diagnostics-header" text="Diagnostics" />
+                  <uie:ToolbarMenu name="diag-severity-menu" class="diag-menu" text="All severities" tooltip="Show one severity" />
+                  <uie:ToolbarMenu name="diag-file-menu" class="diag-menu grow" text="All files" tooltip="Show one file" />
+                  <uie:ToolbarMenu name="diag-source-menu" class="diag-menu" text="All sources" tooltip="Show the diagnostics of godot-uxml (import) or of the editor" />
+                </ui:VisualElement>
                 <ui:ListView name="diagnostics-list" fixed-item-height="18" selection-type="Single" class="grow panel-list" />
               </ui:VisualElement>
             </ui:TwoPaneSplitView>

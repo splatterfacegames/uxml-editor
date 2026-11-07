@@ -74,22 +74,11 @@ func newline() -> String:
 
 
 static func observe_newline_style(s: String) -> String:
-	var crlf := 0
-	var lf := 0
-	var cr := 0
-	var i := 0
-	var n := s.length()
-	while i < n:
-		var c := s.unicode_at(i)
-		if c == 13:
-			if i + 1 < n and s.unicode_at(i + 1) == 10:
-				crlf += 1
-				i += 2
-				continue
-			cr += 1
-		elif c == 10:
-			lf += 1
-		i += 1
+	# Native counts (a per-character loop costs milliseconds per edit on a
+	# large file).
+	var crlf := s.count("\r\n")
+	var lf := s.count("\n") - crlf
+	var cr := s.count("\r") - crlf
 	var kinds := int(crlf > 0) + int(lf > 0) + int(cr > 0)
 	if kinds == 0:
 		return "none"

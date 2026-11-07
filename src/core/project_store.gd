@@ -74,6 +74,26 @@ func revision(rel: String) -> Dictionary:
 	return revision_of(bytes, FileAccess.get_modified_time(p))
 
 
+## True when the file may differ from `known` (a revision): the size or the
+## modification time differs, or the time is too recent to tell (the time
+## has whole seconds). Reads no bytes, so a timer can call it often; a
+## true result needs revision() to decide.
+func may_differ(rel: String, known: Dictionary) -> bool:
+	var p := absolute(rel)
+	var exists := FileAccess.file_exists(p)
+	if exists != bool(known.get("exists", false)):
+		return true
+	if not exists:
+		return false
+	var mtime := FileAccess.get_modified_time(p)
+	if mtime != int(known.get("mtime", -1)):
+		return true
+	var f := FileAccess.open(p, FileAccess.READ)
+	if f == null or f.get_length() != int(known.get("size", -1)):
+		return true
+	return int(Time.get_unix_time_from_system()) - mtime <= 3
+
+
 static func revision_of(bytes: PackedByteArray, mtime: int) -> Dictionary:
 	var ctx := HashingContext.new()
 	ctx.start(HashingContext.HASH_SHA256)

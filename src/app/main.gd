@@ -13,6 +13,11 @@ extends Control
 ##   --screenshot=<png>   save a screenshot after the first renders, then quit
 ##   --script-edit=<a=b>  demo: set attribute a to b on the selection first
 ##   --gdscript           use the GDScript path of godot-uxml (no native core)
+##   --recovery-dir=<dir> directory of the recovery journals (default
+##                        user://recovery)
+##   --watch-interval=<s> seconds between disk checks (default 2; 0: off)
+##   --ready-file=<path>  write this file after the options ran (tests)
+##   --exit-after=<s>     quit after this many seconds (tests)
 ##   --demo=<name>        stage a documentation state before the screenshot
 ##                        (EdDemo: palette, drag-canvas, drag-hierarchy,
 ##                        resize, multi, preview)
@@ -34,6 +39,15 @@ const EDIT_MENU := [
 	["Move up   Alt+Up", "move-up"], ["Move down   Alt+Down", "move-down"],
 	["Rename element type   F2", "rename"],
 ]
+## Hierarchy context menu: the Edit commands without the rename shortcut
+## text; [label, command].
+const CONTEXT_MENU := [
+	["Cut", "cut"], ["Copy", "copy"], ["Paste", "paste"], ["Duplicate", "duplicate"], ["Delete", "delete"],
+	["Wrap in VisualElement", "wrap"], ["Unwrap", "unwrap"], ["Move up", "move-up"], ["Move down", "move-down"],
+	["Rename element type", "rename"],
+]
+const SEVERITY_MENU := [["All severities", ""], ["Errors", "error"], ["Warnings", "warning"], ["Info", "info"]]
+const SOURCE_MENU := [["All sources", ""], ["godot-uxml (import)", "godot-uxml"], ["Editor", "editor"]]
 
 var state := EdEditorState.new()
 var shell: UxmlDocument
@@ -48,7 +62,25 @@ var _render_queued := false
 ## The queued render may be a patch (only the entry buffer changed).
 var _render_patch := false
 var _syncing := false
+## The diagnostics that the list shows (EdDiagnostics entries, filtered).
 var _diagnostics: Array = []
+## Every diagnostic entry before the filters.
+var diagnostics_all: Array = []
+## Filters of the diagnostics list ("" shows all).
+var diag_filter := {"severity": "", "file": "", "source": ""}
+## Document path -> godot-uxml diagnostics of its last render.
+var _render_diags: Dictionary = {}
+var _diag_files: Array = []
+var tabs: EdTabBar
+## Disk check timer (external changes).
+var watch_timer: Timer
+## Questions that wait for the dialog: [{text, ok, cancel, on_ok, on_cancel}].
+var _asks: Array = []
+var _asking: ConfirmationDialog = null
+var _asking_tag := ""
+## The open hierarchy context menu.
+var context_menu: UxmlPopupMenu = null
+var _menu_anchor: Control = null
 var _files_shown: Array = []
 var _dialog: FileDialog
 var _confirm: ConfirmationDialog
@@ -88,6 +120,10 @@ func _ready() -> void:
 	_mount(source, "source-host")
 	inspector = EdInspectorView.new()
 	_mount(inspector, "inspector-host")
+	tabs = EdTabBar.new()
+	_mount(tabs, "tabs-host")
+	tabs.tab_chosen.connect(func(p): state.open_document(p))
+	tabs.tab_closed.connect(close_tab)
 	source.set_workspace(state.workspace)
 
 	shell.button_pressed.connect(_on_button)
@@ -99,6 +135,8 @@ func _ready() -> void:
 	shell.set_menu_items("grid-menu", EdLayoutController.GRIDS.map(func(g): return "No grid" if g <= 1 else "Grid %d px" % g), _on_grid)
 	shell.set_menu_items("preset-menu", PRESETS.map(func(p): return p[0]), _on_preset)
 	shell.set_menu_items("theme-menu", THEMES.map(func(t): return t[0]), _on_theme)
+	shell.set_menu_items("diag-severity-menu", SEVERITY_MENU.map(func(e): return e[0]), func(i, t): _set_diag_filter("severity", SEVERITY_MENU[i][1], "diag-severity-menu", t))
+	shell.set_menu_items("diag-source-menu", SOURCE_MENU.map(func(e): return e[0]), func(i, t): _set_diag_filter("source", SOURCE_MENU[i][1], "diag-source-menu", t))
 	canvas.picked.connect(_on_canvas_picked)
 	canvas.view_changed.connect(_update_zoom_label)
 	layout = EdLayoutController.new(state, canvas)
@@ -125,6 +163,10 @@ func _ready() -> void:
 	state.selection_changed.connect(_on_selection_changed)
 	state.buffers_changed.connect(_on_buffers_changed)
 	state.status.connect(_on_status)
+	state.tabs_changed.connect(_refresh_tabs)
+	state.recovery_found.connect(_on_recovery_found)
+	state.external_conflicts.connect(_on_external_conflicts)
+	state.refused.connect(func(_e): _refresh_diagnostics())
 	state.workspace.history.history_changed.connect(_update_history_label)
 	canvas.host.rendered.connect(_on_rendered)
 
@@ -137,12 +179,20 @@ func _ready() -> void:
 	add_child(_dialog)
 	_confirm = ConfirmationDialog.new()
 	add_child(_confirm)
+	watch_timer = Timer.new()
+	watch_timer.wait_time = 2.0
+	watch_timer.timeout.connect(_on_watch_timer)
+	add_child(watch_timer)
 
 	_set_preset(_preset)
 	_parse_args()
 	_update_history_label()
-	inspector.show_selection(null, null, null)
+	_refresh_tabs()
+	if state.session == null:
+		inspector.show_selection(null, null, null)
 	get_window().focus_entered.connect(_on_window_focus)
+	if watch_timer.wait_time > 0:
+		watch_timer.start()
 
 
 ## Disable the native core of godot-uxml (the path of the web export and
@@ -180,6 +230,12 @@ func _parse_args() -> void:
 			_args[a.substr(2, eq - 2)] = a.substr(eq + 1)
 		elif a.begins_with("--"):
 			_args[a.substr(2)] = ""
+	if _args.has("recovery-dir"):
+		state.recovery_base = String(_args["recovery-dir"])
+	if _args.has("watch-interval"):
+		watch_timer.wait_time = maxf(0.0, float(_args["watch-interval"]))
+	if _args.has("exit-after"):
+		get_tree().create_timer(float(_args["exit-after"])).timeout.connect(func(): get_tree().quit(3))
 	if _args.has("preset"):
 		_set_preset(int(_args["preset"]))
 	if _args.has("theme"):
@@ -201,6 +257,13 @@ func _parse_args() -> void:
 				state.execute(EdUxmlCommands.set_attribute(state.session, state.selection[0], kv[0], kv[1]), "args")
 		if _args.has("source"):
 			_show_source(_args["source"])
+	if _args.has("ready-file"):
+		# The journal is flushed at each edit, so the edits above are on
+		# disk now.
+		var f := FileAccess.open(String(_args["ready-file"]), FileAccess.WRITE)
+		if f != null:
+			f.store_string(str(OS.get_process_id()))
+			f.close()
 	if _args.has("screenshot"):
 		_screenshot.call_deferred(String(_args["screenshot"]))
 
@@ -350,6 +413,11 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 			_dialog.popup_centered_ratio(0.6)
 		KEY_P:
 			set_preview(not canvas.preview)
+		KEY_W:
+			if state.session != null:
+				close_tab(state.session.entry_path)
+		KEY_TAB:
+			cycle_tab(-1 if k.shift_pressed else 1)
 		KEY_EQUAL, KEY_PLUS:
 			canvas.set_zoom(canvas.zoom * 1.25)
 		KEY_MINUS:
@@ -370,6 +438,13 @@ func _input(ev: InputEvent) -> void:
 	if drag != null and drag.handle_input(ev):
 		get_viewport().set_input_as_handled()
 		return
+	var mb := ev as InputEventMouseButton
+	if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT and not canvas.preview:
+		var tree_c := shell.get_element("hierarchy-tree")
+		if tree_c != null and tree_c.get_global_rect().has_point(mb.global_position):
+			open_context_menu(mb.global_position)
+			get_viewport().set_input_as_handled()
+			return
 	# Alt+Up and Alt+Down move the selection before a list takes them as
 	# plain arrow keys.
 	var k := ev as InputEventKey
@@ -485,6 +560,48 @@ func run_command(cmd: String) -> bool:
 	return false
 
 
+## The hierarchy context menu at global point `at`: the row under the
+## point joins the selection first (as in Unity), then the Edit commands.
+## The menu is a godot-uxml popup (UxmlPopupMenu) under a zero-size anchor
+## at the point.
+func open_context_menu(at: Vector2) -> void:
+	_close_context_menu()
+	var id := _tree_row_at(at)
+	if id >= 0 and state.session != null:
+		var t := state.session.tree()
+		if id < t.nodes.size():
+			var n: EdUxmlNode = t.nodes[id]
+			if not state.selected_nodes().has(n):
+				state.select_node(n, "context-menu")
+	_menu_anchor = Control.new()
+	_menu_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_menu_anchor)
+	_menu_anchor.global_position = at
+	_menu_anchor.size = Vector2(160, 0)
+	context_menu = UxmlPopupMenu.open(_menu_anchor, PackedStringArray(CONTEXT_MENU.map(func(e): return e[0])), -1, shell.theme_path, shell)
+	context_menu.chosen.connect(func(i): run_command(CONTEXT_MENU[i][1]))
+	context_menu.popup_hide.connect(_close_context_menu, CONNECT_DEFERRED)
+
+
+func _close_context_menu() -> void:
+	if context_menu != null and is_instance_valid(context_menu):
+		context_menu.queue_free()
+	context_menu = null
+	if _menu_anchor != null and is_instance_valid(_menu_anchor):
+		_menu_anchor.queue_free()
+	_menu_anchor = null
+
+
+## The hierarchy item id of the row under global point `at`, or -1.
+func _tree_row_at(at: Vector2) -> int:
+	for row in shell.get_list_rows("hierarchy-tree"):
+		var c: Control = row.get_element()
+		if c != null and c.is_visible_in_tree() and c.get_global_rect().has_point(at):
+			var item := shell.get_tree_item("hierarchy-tree", row.index)
+			return -1 if item.is_empty() else int(item["id"])
+	return -1
+
+
 func _refuse(message: String) -> bool:
 	state.status.emit(message, true)
 	return false
@@ -568,8 +685,124 @@ func _on_canvas_picked(id: int, additive: bool) -> void:
 
 
 func _on_window_focus() -> void:
-	if state.has_project():
+	if state.has_project() and _asking == null:
 		state.check_external_changes()
+
+
+## The disk check of the timer: only files whose size or time changed are
+## read (EdProjectStore.may_differ). No check while a question is open.
+func _on_watch_timer() -> void:
+	if state.has_project() and _asking == null and state.pending_recovery.is_empty():
+		source.flush()
+		state.check_external_changes(true)
+
+
+## Ask a question in a dialog. Questions wait in a queue; one dialog at a
+## time. Native control: ConfirmationDialog (godot-uxml has no modal
+## window).
+## `tag` names the question (a question with the tag of a waiting or open
+## question is not asked again).
+func ask(text: String, ok_text: String, cancel_text: String, on_ok: Callable, on_cancel: Callable = Callable(), tag: String = "") -> void:
+	if not tag.is_empty() and (_asking_tag == tag or _asks.any(func(q): return q["tag"] == tag)):
+		return
+	_asks.append({"text": text, "ok": ok_text, "cancel": cancel_text, "on_ok": on_ok, "on_cancel": on_cancel, "tag": tag})
+	if _asking == null:
+		_next_question()
+
+
+func _next_question() -> void:
+	if _asks.is_empty():
+		_asking = null
+		_asking_tag = ""
+		return
+	var q: Dictionary = _asks.pop_front()
+	_asking_tag = q["tag"]
+	var d := ConfirmationDialog.new()
+	d.dialog_text = q["text"]
+	d.ok_button_text = q["ok"]
+	d.cancel_button_text = q["cancel"]
+	d.dialog_autowrap = true
+	d.min_size = Vector2i(520, 0)
+	_asking = d
+	var done := func(ok: bool):
+		if _asking != d:
+			return
+		_asking = null
+		_asking_tag = ""
+		d.queue_free()
+		var cb: Callable = q["on_ok"] if ok else q["on_cancel"]
+		if cb.is_valid():
+			cb.call()
+		_next_question()
+	d.confirmed.connect(done.bind(true))
+	d.canceled.connect(done.bind(false))
+	add_child(d)
+	d.popup_centered()
+
+
+## Answer the open question (tests and automation): `ok` true presses the
+## OK button.
+func answer(ok: bool) -> bool:
+	if _asking == null:
+		return false
+	if ok:
+		_asking.confirmed.emit()
+	else:
+		_asking.canceled.emit()
+	return true
+
+
+func _on_recovery_found(info: Dictionary) -> void:
+	var paths: Array = info["files"].keys()
+	paths.sort()
+	var text := "The last session ended with unsaved edits in:\n\n%s\n\nRecover the edits? Discard deletes them." % "\n".join(paths)
+	var conflicts: Array = info.get("conflicts", [])
+	if not conflicts.is_empty():
+		text += "\n\nChanged on disk since then: %s. A save of a recovered file asks before an overwrite." % ", ".join(conflicts)
+	if info.get("truncated", false):
+		text += "\n\nThe last record was incomplete and is not used."
+	ask(text, "Recover", "Discard", func(): state.recover(), func(): state.discard_recovery(), "recovery")
+
+
+func _on_external_conflicts(paths: Array) -> void:
+	for p in paths:
+		ask("%s changed on disk, and the editor has unsaved edits of the file.\n\nReload the file from disk (the unsaved edits are lost), or keep the editor text (a save asks before an overwrite)?" % p,
+			"Reload from disk", "Keep editor text", func(): state.reload_from_disk(p), func(): state.keep_editor_text(p), "conflict:" + p)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		source.flush()
+		state.close_project()
+
+
+# ---------------------------------------------------------------------------
+# Tabs
+# ---------------------------------------------------------------------------
+
+func _refresh_tabs() -> void:
+	if tabs == null:
+		return
+	var dirty := {}
+	for t in state.tabs:
+		var s := EdDocumentSession.new(state.workspace, t)
+		for p in [t] + s.style_paths():
+			if state.workspace.is_dirty(p):
+				dirty[t] = true
+	tabs.show_tabs(state.tabs, state.session.entry_path if state.session != null else "", dirty)
+
+
+func close_tab(path: String) -> void:
+	source.flush()
+	state.close_document(path)
+
+
+## Ctrl+Tab: the next tab (Shift: the previous one).
+func cycle_tab(step: int) -> void:
+	if state.tabs.size() < 2 or state.session == null:
+		return
+	var i := state.tabs.find(state.session.entry_path)
+	state.open_document(state.tabs[posmod(i + step, state.tabs.size())])
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +810,7 @@ func _on_window_focus() -> void:
 # ---------------------------------------------------------------------------
 
 func _on_project_opened() -> void:
+	_render_diags.clear()
 	source.set_workspace(state.workspace)
 	state.workspace.history.history_changed.connect(_update_history_label)
 	_update_history_label()
@@ -591,6 +825,17 @@ func _on_project_opened() -> void:
 
 func _on_document_opened(path: String) -> void:
 	_update_canvas_header()
+	_refresh_tabs()
+	if path.is_empty():
+		# The last tab closed.
+		canvas.host.clear()
+		canvas.selected_ids = []
+		_show_source("")
+		_refresh_files()
+		_refresh_hierarchy()
+		_refresh_diagnostics()
+		inspector.show_selection(null, null, null)
+		return
 	_show_source(path)
 	_refresh_files()
 	_queue_render()
@@ -642,6 +887,7 @@ func _render() -> void:
 
 func _on_rendered() -> void:
 	layout.rendered()
+	_render_diags[canvas.host.entry_path] = canvas.host.diagnostics.duplicate()
 	# A patch changes `style` or `class` only; the hierarchy shows classes.
 	if not canvas.host.last_was_patch or canvas.host.last_patch_attrs.has("class"):
 		_refresh_hierarchy()
@@ -651,6 +897,7 @@ func _on_rendered() -> void:
 
 func _on_buffers_changed(paths: Array, _cause: String, tx: EdTransaction) -> void:
 	_refresh_files()
+	_refresh_tabs()
 	_refresh_source_menu()
 	if paths.has(source_path) and (tx == null or tx.origin != "source" or not source.has_focus()):
 		source.reload_from_buffer()
@@ -665,7 +912,7 @@ func _refresh_files() -> void:
 	for f in _files_shown:
 		var mark := "● " if state.workspace.is_dirty(f) else "   "
 		var active: bool = state.session != null and state.session.entry_path == f
-		items.append("%s%s%s" % [mark, f, "  (open)" if active else ""])
+		items.append("%s%s%s" % [mark, f, "  (active)" if active else ("  (open)" if state.tabs.has(f) else "")])
 	if not _changed("files-list", items):
 		return
 	_syncing = true
@@ -702,31 +949,61 @@ func _tree_item(n: EdUxmlNode) -> Dictionary:
 
 
 func _refresh_diagnostics() -> void:
-	_diagnostics.clear()
-	var files := state.document_files()
-	for p in files:
-		var b := state.workspace.buffer(p)
-		if b == null:
-			continue
-		if not b.exact:
-			_diagnostics.append({"file": p, "offset": 0, "text": "editor  %s  the file does not decode to its exact bytes; it is read only" % p})
-		var problems: Array = state.workspace.uxml(p).problems if p.to_lower().ends_with(".uxml") else state.workspace.uss(p).problems
-		for pr in problems:
-			var lc := UxmlDiagnostic.line_col(b.text, pr["start"])
-			_diagnostics.append({"file": p, "offset": pr["start"], "text": "editor  %s:%d:%d  %s" % [p, lc.x, lc.y, pr["message"]]})
-	var root := state.store.root if state.has_project() else ""
-	for d in canvas.host.diagnostics if state.session != null else []:
-		var f := String(d.get("file", ""))
-		var rel := f
-		if not root.is_empty() and EdBufferResolver.key(f).begins_with(EdBufferResolver.key(root) + "/"):
-			rel = f.substr(root.length() + 1)
-		_diagnostics.append({"file": rel, "offset": int(d.get("offset", 0)), "text": "%s  %s:%d:%d  %s" % [d.get("kind", ""), rel.get_file(), d.get("line", 0), d.get("column", 0), d.get("message", "")]})
-	var texts: Array = _diagnostics.map(func(d): return d["text"])
+	# Documents that are no longer open keep no render diagnostics.
+	for d in _render_diags.keys():
+		if not state.tabs.has(d):
+			_render_diags.erase(d)
+	diagnostics_all = EdDiagnostics.collect(state, _render_diags, state.store.root if state.has_project() else "")
+	var files: Array = []
+	for e in diagnostics_all:
+		if not e["file"].is_empty() and not files.has(e["file"]):
+			files.append(e["file"])
+	files.sort()
+	if not diag_filter["file"].is_empty() and not files.has(diag_filter["file"]):
+		files.append(diag_filter["file"])
+	if _changed("diag-file-menu", files):
+		_diag_files = files
+		shell.set_menu_items("diag-file-menu", ["All files"] + files, func(i, t): _set_diag_filter("file", "" if i == 0 else _diag_files[i - 1], "diag-file-menu", t))
+	_diagnostics = EdDiagnostics.filter(diagnostics_all, diag_filter["severity"], diag_filter["file"], diag_filter["source"])
+	var texts: Array = _diagnostics.map(EdDiagnostics.line)
 	if _changed("diagnostics-list", texts):
 		_syncing = true
 		shell.set_items_source("diagnostics-list", texts)
 		_syncing = false
-	EdUi.set_label(shell, "diagnostics-header", "Diagnostics (%d)" % _diagnostics.size() if not _diagnostics.is_empty() else "Diagnostics")
+	var n := diagnostics_all.size()
+	var header := "Diagnostics"
+	if n > 0:
+		header = "Diagnostics (%d)" % n if _diagnostics.size() == n else "Diagnostics (%d/%d)" % [_diagnostics.size(), n]
+	EdUi.set_label(shell, "diagnostics-header", header)
+
+
+func _set_diag_filter(key: String, value: String, menu: String, text: String) -> void:
+	diag_filter[key] = value
+	_set_menu_text(menu, text)
+	_refresh_diagnostics()
+
+
+## Show diagnostic `e`: its file in the source view with the range
+## selected, and the element at the range in the canvas and the hierarchy
+## (a UXML document opens in a tab).
+func jump_to_diagnostic(e: Dictionary) -> void:
+	var f: String = e["file"]
+	if not state.workspace.has(f):
+		return
+	source.flush()
+	if f.to_lower().ends_with(".uxml") and (state.session == null or state.session.entry_path != f):
+		state.open_document(f)
+	if state.session != null and state.session.entry_path == f and e["start"] >= 0:
+		var t := state.session.tree()
+		var n := t.find_by_open_start(e["start"])
+		if n == null:
+			n = t.element_at_offset(e["start"])
+		if n != null:
+			state.select_node(n, "diagnostics")
+	if source_path != f:
+		_show_source(f)
+	if e["start"] >= 0:
+		source.mark_range(e["start"], maxi(e["end"], e["start"] + 1))
 
 
 # ---------------------------------------------------------------------------
@@ -754,11 +1031,8 @@ func _on_list_selection(list_name: String, indices: Array) -> void:
 					nodes.append(t.nodes[int(item["id"])])
 			state.select_nodes(nodes, "hierarchy")
 		"diagnostics-list":
-			var d: Dictionary = _diagnostics[indices[0]]
-			if state.workspace.has(d["file"]):
-				if d["file"] != source_path:
-					_show_source(d["file"])
-				source.mark_range(d["offset"], d["offset"] + 1)
+			if indices[0] < _diagnostics.size():
+				jump_to_diagnostic(_diagnostics[indices[0]])
 
 
 func _on_source_caret(offset: int) -> void:

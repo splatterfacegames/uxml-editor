@@ -8,8 +8,9 @@ extends RefCounted
 ## every patch set first and changes no buffer when one patch set is
 ## invalid.
 
-## `paths` changed. `cause` is "execute", "undo", "redo", "load", "save" or
-## "reload". `tx` is the transaction that ran (null for load/save/reload).
+## `paths` changed. `cause` is "execute", "undo", "redo", "load", "save",
+## "reload" or "recover". `tx` is the transaction that ran (null for the
+## others).
 signal buffers_changed(paths: Array, cause: String, tx: EdTransaction)
 
 ## path -> EdSourceBuffer
@@ -51,6 +52,19 @@ func set_buffer(path: String, b: EdSourceBuffer, revision: Dictionary = {}, caus
 	_uxml_cache.erase(path)
 	_uss_cache.erase(path)
 	buffers_changed.emit([path], cause, null)
+
+
+## Put recovered unsaved text into `path` (the recovery journal): the
+## buffer gets `text`; the saved state gets `base_text` and `revision`, so
+## the file is dirty and a save checks the disk against `revision`.
+func restore(path: String, text: String, base_text: String, bom: bool, revision: Dictionary) -> void:
+	if buffers.has(path):
+		history.forget_path(path)
+	buffers[path] = EdSourceBuffer.new(path, text, bom)
+	base[path] = {"text": base_text, "bom": bom, "revision": revision}
+	_uxml_cache.erase(path)
+	_uss_cache.erase(path)
+	buffers_changed.emit([path], "recover", null)
 
 
 ## Record that `path` now matches disk at `revision` (after a save).

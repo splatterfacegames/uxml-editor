@@ -29,6 +29,8 @@ func _run() -> void:
 			UssParser.use_native = false
 			UssCascade.use_native = false
 			UxmlDocument.use_native_layout = false
+	# Journals of the test projects go to a directory of their own.
+	EdEditorState.default_recovery_base = "user://test-recovery"
 	var logger := ErrorCounter.new()
 	OS.add_logger(logger)
 	var broken := _compile_all("res://src")
@@ -81,8 +83,17 @@ func _run() -> void:
 		failed += 1
 	for msg in failures:
 		printerr("FAIL " + msg)
+	_rm(ProjectSettings.globalize_path("user://test-recovery"))
 	print("%d tests, %d checks, %d failed (%.1f s)" % [total, checks, failed, (Time.get_ticks_msec() - started) / 1000.0])
 	quit(mini(failed, 255))
+
+
+static func _rm(dir: String) -> void:
+	for f in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir + "/" + f)
+	for d in DirAccess.get_directories_at(dir):
+		_rm(dir + "/" + d)
+	DirAccess.remove_absolute(dir)
 
 
 ## Load every script under `dir`; return the paths that fail to compile.
