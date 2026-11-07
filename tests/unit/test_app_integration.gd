@@ -145,14 +145,16 @@ func test_source_edit_shares_the_history_and_keeps_crlf() -> void:
 	await _frames()
 	var before := m.state.workspace.text(MENU)
 	ok(before.contains("\r\n"), "CRLF fixture")
-	m.source.text = m.source.text.replace("Main Menu", "Main Menu!")
-	m.source._timer.start()
+	m.source._replace_changed(m.source.text, m.source.text.replace("Main Menu", "Main Menu!"))
+	await _frames(1)
+	ok(m.source.has_pending_edit(), "typed text is pending")
 	m.source.flush()
 	await _frames()
 	var after := m.state.workspace.text(MENU)
 	eq(after, before.replace("Main Menu", "Main Menu!"), "one patch; every CRLF kept")
-	m.source.text = m.source.text.replace("<ui:Label name=\"menu-title\" text=\"Main Menu!\" />", "<ui:Label name=\"menu-title\" text=\"Main Menu!\" />\n    <ui:Label text=\"New\" />")
-	m.source._timer.start()
+	m.source._replace_changed(m.source.text, m.source.text.replace("<ui:Label name=\"menu-title\" text=\"Main Menu!\" />", "<ui:Label name=\"menu-title\" text=\"Main Menu!\" />\n    <ui:Label text=\"New\" />"))
+	await _frames(1)
+	ok(m.source.has_pending_edit(), "typed text is pending")
 	m.source.flush()
 	await _frames()
 	ok(m.state.workspace.text(MENU).contains("/>\r\n    <ui:Label text=\"New\" />"), "a typed line break is written as CRLF")
@@ -161,6 +163,28 @@ func test_source_edit_shares_the_history_and_keeps_crlf() -> void:
 	await _frames()
 	eq(m.state.workspace.text(MENU), before)
 	eq(m.source.text, EdNewlineMap.make(before).display, "source view follows undo")
+
+
+func test_a_typing_pause_commits_the_source_edit() -> void:
+	var m := _editor()
+	await _frames()
+	m.state.open_project(_copy_fixture("menu"))
+	await _frames()
+	var before := m.state.workspace.text(MENU)
+	m.source._replace_changed(m.source.text, m.source.text.replace("Main Menu", "Main Menu?"))
+	await _frames(1)
+	ok(m.source.has_pending_edit(), "pending after typing")
+	eq(m.state.workspace.text(MENU), before, "no patch before the pause")
+	var t0 := Time.get_ticks_msec()
+	while m.source.has_pending_edit() and Time.get_ticks_msec() - t0 < 3000:
+		await tree.process_frame
+	ok(not m.source.has_pending_edit(), "the pause timer commits")
+	eq(m.state.workspace.text(MENU), before.replace("Main Menu", "Main Menu?"), "one patch after the pause")
+	eq(m.state.workspace.history.undo_depth(), 1)
+	# A programmatic reload is not an edit.
+	m.source.reload_from_buffer(true)
+	await _frames(1)
+	ok(not m.source.has_pending_edit(), "a reload is not pending")
 
 
 func test_stylesheet_edit_rerenders_from_the_buffer() -> void:

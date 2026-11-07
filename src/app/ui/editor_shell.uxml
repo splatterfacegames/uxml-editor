@@ -79,8 +79,8 @@
       </ui:TwoPaneSplitView>
     </ui:TwoPaneSplitView>
     <ui:VisualElement name="status-bar" class="status-bar">
-      <ui:Label name="status-label" class="status-label grow" text="Open a project directory to begin." />
-      <ui:Label name="history-label" class="status-label" text="" />
+      <ui:Label name="status-label" class="status-label status-message" text="Open a project directory to begin." />
+      <ui:Label name="history-label" class="status-label history-label" text="" />
     </ui:VisualElement>
   </ui:VisualElement>
 </ui:UXML>

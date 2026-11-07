@@ -12,6 +12,7 @@ extends Control
 ##   --source=<path>      show this file in the source view
 ##   --screenshot=<png>   save a screenshot after the first renders, then quit
 ##   --script-edit=<a=b>  demo: set attribute a to b on the selection first
+##   --gdscript           use the GDScript path of godot-uxml (no native core)
 ##   --demo=<name>        stage a documentation state before the screenshot
 ##                        (EdDemo: palette, drag-canvas, drag-hierarchy,
 ##                        resize, multi, preview)
@@ -44,6 +45,8 @@ var drag: EdDragController
 var layout: EdLayoutController
 var source_path := ""
 var _render_queued := false
+## The queued render may be a patch (only the entry buffer changed).
+var _render_patch := false
 var _syncing := false
 var _diagnostics: Array = []
 var _files_shown: Array = []
@@ -51,9 +54,21 @@ var _dialog: FileDialog
 var _confirm: ConfirmationDialog
 var _args := {}
 var _preset := 2
+## Last data given to each shell list, menu, label and class, so an update
+## with the same data costs nothing (a godot-uxml list or text update
+## restyles and lays out the window).
+var _shown := {}
+## The hierarchy changed since the last selection sync.
+var _tree_dirty := true
+var _tree_selected: Array = []
+## Hierarchy item id -> visible row index; empty when stale (a new tree
+## source, or an item opened or closed).
+var _tree_rows: Dictionary = {}
 
 
 func _ready() -> void:
+	if OS.get_cmdline_user_args().has("--gdscript") or OS.has_feature("web"):
+		use_gdscript_path()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	get_window().title = "UXML Editor"
 	get_window().min_size = Vector2i(1000, 600)
@@ -78,6 +93,7 @@ func _ready() -> void:
 	shell.button_pressed.connect(_on_button)
 	shell.selection_changed.connect(_on_list_selection)
 	shell.items_chosen.connect(_on_items_chosen)
+	shell.item_expanded_changed.connect(func(_list, _id, _on): _tree_rows.clear())
 	shell.value_changed.connect(_on_shell_value)
 	shell.set_menu_items("edit-menu", EDIT_MENU.map(func(e): return e[0]), func(i, _t): run_command(EDIT_MENU[i][1]))
 	shell.set_menu_items("grid-menu", EdLayoutController.GRIDS.map(func(g): return "No grid" if g <= 1 else "Grid %d px" % g), _on_grid)
@@ -127,6 +143,15 @@ func _ready() -> void:
 	_update_history_label()
 	inspector.show_selection(null, null, null)
 	get_window().focus_entered.connect(_on_window_focus)
+
+
+## Disable the native core of godot-uxml (the path of the web export and
+## of platforms without the DLL). Before the first document loads.
+static func use_gdscript_path() -> void:
+	UxmlParser.use_native = false
+	UssParser.use_native = false
+	UssCascade.use_native = false
+	UxmlDocument.use_native_layout = false
 
 
 func _mount(c: Control, host_name: String) -> void:
@@ -264,6 +289,20 @@ func _on_theme(index: int, text: String) -> void:
 	_queue_render()
 
 
+## True when `data` differs from the last data shown in `key` (and
+## records it).
+func _changed(key: String, data: Variant) -> bool:
+	if _shown.has(key) and _shown[key] == data:
+		return false
+	_shown[key] = data.duplicate(true) if data is Array or data is Dictionary else data
+	return true
+
+
+func _shell_class(element_name: String, cls: String) -> void:
+	if _changed("class:" + element_name, cls):
+		shell.set_class(element_name, cls)
+
+
 func _set_menu_text(menu: String, text: String) -> void:
 	var el := shell.get_element_model(menu)
 	if el != null:
@@ -271,7 +310,7 @@ func _set_menu_text(menu: String, text: String) -> void:
 
 
 func _update_zoom_label() -> void:
-	shell.set_text("zoom-label", "%d%%" % int(round(canvas.zoom * 100)))
+	EdUi.set_label(shell, "zoom-label", "%d%%" % int(round(canvas.zoom * 100)))
 
 
 func _update_history_label() -> void:
@@ -281,12 +320,12 @@ func _update_history_label() -> void:
 		s += "Undo: %s" % h.undo_label()
 	if h.can_redo():
 		s += ("   " if not s.is_empty() else "") + "Redo: %s" % h.redo_label()
-	shell.set_text("history-label", s)
+	EdUi.set_label(shell, "history-label", s)
 
 
 func _on_status(message: String, is_error: bool) -> void:
-	shell.set_text("status-label", message)
-	shell.set_class("status-label", "status-label grow" + (" error" if is_error else ""))
+	EdUi.set_label(shell, "status-label", message)
+	_shell_class("status-label", "status-label status-message" + (" error" if is_error else ""))
 	if is_error:
 		push_warning(message)
 
@@ -568,19 +607,25 @@ func _refresh_source_menu() -> void:
 	var files := state.document_files()
 	if not source_path.is_empty() and not files.has(source_path):
 		files.append(source_path)
-	shell.set_menu_items("source-file-menu", files, func(_i, t): _show_source(t))
+	if _changed("source-file-menu", files):
+		shell.set_menu_items("source-file-menu", files, func(_i, t): _show_source(t))
 	_set_menu_text("source-file-menu", source_path if not source_path.is_empty() else "(no file)")
 	var b := state.workspace.buffer(source_path)
 	var st := ""
 	if b != null:
 		st = ("modified" if state.workspace.is_dirty(source_path) else "saved") + "  ·  " + b.newline_style.to_upper() + ("  ·  BOM" if b.bom else "") + ("" if b.exact else "  ·  read only (inexact bytes)")
-	shell.set_text("source-state", st)
+	EdUi.set_label(shell, "source-state", st)
 
 
-func _queue_render() -> void:
+## Queue a render at the end of the frame. `patch_ok`: the change may go
+## to the live render as a patch (EdRenderHost.patch); any full request in
+## the same frame wins.
+func _queue_render(patch_ok: bool = false) -> void:
 	if _render_queued:
+		_render_patch = _render_patch and patch_ok
 		return
 	_render_queued = true
+	_render_patch = patch_ok
 	_render.call_deferred()
 
 
@@ -590,12 +635,16 @@ func _render() -> void:
 		_refresh_hierarchy()
 		_refresh_diagnostics()
 		return
+	if _render_patch and canvas.host.patch(state.workspace, state.session.entry_path):
+		return
 	canvas.host.render(state.workspace, state.session.entry_path, state.store.root)
 
 
 func _on_rendered() -> void:
 	layout.rendered()
-	_refresh_hierarchy()
+	# A patch changes `style` or `class` only; the hierarchy shows classes.
+	if not canvas.host.last_was_patch or canvas.host.last_patch_attrs.has("class"):
+		_refresh_hierarchy()
 	_refresh_diagnostics()
 	_on_selection_changed("render")
 
@@ -607,7 +656,7 @@ func _on_buffers_changed(paths: Array, _cause: String, tx: EdTransaction) -> voi
 		source.reload_from_buffer()
 	elif paths.has(source_path):
 		source.reload_from_buffer()
-	_queue_render()
+	_queue_render(state.session != null and paths.size() == 1 and paths[0] == state.session.entry_path and not canvas.preview)
 
 
 func _refresh_files() -> void:
@@ -617,6 +666,8 @@ func _refresh_files() -> void:
 		var mark := "● " if state.workspace.is_dirty(f) else "   "
 		var active: bool = state.session != null and state.session.entry_path == f
 		items.append("%s%s%s" % [mark, f, "  (open)" if active else ""])
+	if not _changed("files-list", items):
+		return
 	_syncing = true
 	shell.set_items_source("files-list", items)
 	_syncing = false
@@ -626,6 +677,10 @@ func _refresh_hierarchy() -> void:
 	var roots: Array = []
 	if state.session != null and state.session.root() != null:
 		roots = [_tree_item(state.session.root())]
+	if not _changed("hierarchy-tree", roots):
+		return
+	_tree_dirty = true
+	_tree_rows.clear()
 	_syncing = true
 	shell.set_tree_source("hierarchy-tree", roots)
 	_syncing = false
@@ -666,10 +721,12 @@ func _refresh_diagnostics() -> void:
 		if not root.is_empty() and EdBufferResolver.key(f).begins_with(EdBufferResolver.key(root) + "/"):
 			rel = f.substr(root.length() + 1)
 		_diagnostics.append({"file": rel, "offset": int(d.get("offset", 0)), "text": "%s  %s:%d:%d  %s" % [d.get("kind", ""), rel.get_file(), d.get("line", 0), d.get("column", 0), d.get("message", "")]})
-	_syncing = true
-	shell.set_items_source("diagnostics-list", _diagnostics.map(func(d): return d["text"]))
-	_syncing = false
-	shell.set_text("diagnostics-header", "Diagnostics (%d)" % _diagnostics.size() if not _diagnostics.is_empty() else "Diagnostics")
+	var texts: Array = _diagnostics.map(func(d): return d["text"])
+	if _changed("diagnostics-list", texts):
+		_syncing = true
+		shell.set_items_source("diagnostics-list", texts)
+		_syncing = false
+	EdUi.set_label(shell, "diagnostics-header", "Diagnostics (%d)" % _diagnostics.size() if not _diagnostics.is_empty() else "Diagnostics")
 
 
 # ---------------------------------------------------------------------------
@@ -718,6 +775,8 @@ func _on_selection_changed(origin: String) -> void:
 	canvas.selected_ids = nodes.map(func(x): return x.id)
 	if origin != "hierarchy":
 		_select_in_tree(nodes)
+	else:
+		_tree_selected = nodes.map(func(x): return x.id)
 	if origin != "source":
 		_mark_selection_in_source(origin != "render")
 	inspector.show_selection(state.session, n, canvas.host, nodes.size())
@@ -734,6 +793,11 @@ func _mark_selection_in_source(reveal: bool) -> void:
 
 
 func _select_in_tree(nodes: Array) -> void:
+	var ids: Array = nodes.map(func(x): return x.id)
+	if not _tree_dirty and ids == _tree_selected:
+		return
+	_tree_dirty = false
+	_tree_selected = ids
 	_syncing = true
 	if nodes.is_empty():
 		shell.set_selection("hierarchy-tree", [])
@@ -746,22 +810,19 @@ func _select_in_tree(nodes: Array) -> void:
 		while a != null:
 			shell.set_tree_item_expanded("hierarchy-tree", a.id, true)
 			a = a.parent
-	var found: Array = []
-	var primary := -1
-	var i := 0
-	while true:
-		var item := shell.get_tree_item("hierarchy-tree", i)
-		if item.is_empty():
-			break
-		if want.has(int(item["id"])):
-			if int(item["id"]) == nodes[0].id:
-				primary = i
-			else:
-				found.append(i)
-		i += 1
+	if _tree_rows.is_empty():
+		var i := 0
+		while true:
+			var item := shell.get_tree_item("hierarchy-tree", i)
+			if item.is_empty():
+				break
+			_tree_rows[int(item["id"])] = i
+			i += 1
 	# Primary first, as the canvas and the inspector show it.
-	if primary >= 0:
-		found.push_front(primary)
+	var found: Array = []
+	for n in nodes:
+		if _tree_rows.has(n.id) and not found.has(_tree_rows[n.id]):
+			found.append(_tree_rows[n.id])
 	shell.set_selection("hierarchy-tree", found)
 	if not found.is_empty():
 		shell.scroll_to_item("hierarchy-tree", found[0])

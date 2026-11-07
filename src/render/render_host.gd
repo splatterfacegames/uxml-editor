@@ -12,6 +12,9 @@ extends SubViewport
 signal rendered
 
 const THEMES := ["auto", "runtime", "editor-dark", "editor-light"]
+## Attributes that patch() applies to the live render through the
+## godot-uxml element model (an incremental restyle).
+const PATCHABLE := ["style", "class"]
 
 var doc: UxmlDocument = null
 ## editor node id -> UxmlElement (authored elements of the entry file)
@@ -22,10 +25,22 @@ var node_for_element: Dictionary = {}
 var diagnostics: Array = []
 var theme_mode: String = "auto"
 var last_render_ms: float = 0.0
+## Number of full renders and of patches (tests and the benchmark).
+var renders := 0
+var patches := 0
+## The last update was a patch, and which attributes it changed.
+var last_was_patch := false
+var last_patch_attrs := {}
 var entry_path: String = ""
 var _root: String = ""
 ## EdBufferResolver.key(absolute path) -> workspace path, for every buffer.
 var _paths_by_key: Dictionary = {}
+## Mapped node ids, deepest first (ties: the later element first), so a
+## hit-test stops at the first hit.
+var _hit_order: Array = []
+## The entry parse of the last render or patch, and its skeleton.
+var _tree: EdUxmlSource = null
+var _skeleton := ""
 
 
 func _init() -> void:
@@ -85,9 +100,89 @@ func render(ws: EdWorkspace, entry: String, root_abs: String) -> void:
 		resolver.set_override(root_abs + "/" + p, ws.text(p))
 		_paths_by_key[EdBufferResolver.key(root_abs + "/" + p)] = p
 	_load_source(ws.text(entry), root_abs + "/" + entry, resolver)
-	_map(ws.uxml(entry))
+	_tree = ws.uxml(entry)
+	_map(_tree)
+	_skeleton = _skeleton_of(_tree, element_for_node)
+	renders += 1
+	last_was_patch = false
 	last_render_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	rendered.emit()
+
+
+## Bring the render up to date with the entry buffer without a reload,
+## when the only change since the last render is the value of a `style` or
+## `class` attribute of rendered elements: the new values go to the
+## godot-uxml element model, which restyles only those elements (a partial
+## form of request R4). Returns false when a full render() is needed: an
+## other buffer changed, the structure or another attribute changed, or an
+## unrendered element changed.
+## The element map stays valid: the same structure gives the same node ids.
+func patch(ws: EdWorkspace, entry: String) -> bool:
+	if doc == null or doc._doc == null or _tree == null or entry != entry_path:
+		return false
+	var tree := ws.uxml(entry)
+	if tree == null:
+		return false
+	if tree == _tree:
+		return true
+	if tree.nodes.size() != _tree.nodes.size() or _skeleton.is_empty() or _skeleton_of(tree, element_for_node) != _skeleton:
+		return false
+	var t0 := Time.get_ticks_usec()
+	last_patch_attrs = {}
+	for n in tree.nodes:
+		var el: UxmlElement = element_for_node.get(n.id)
+		if el == null:
+			continue
+		var old: EdUxmlNode = _tree.nodes[n.id]
+		for attr in PATCHABLE:
+			var nv = n.get_attribute(attr)
+			if nv == old.get_attribute(attr):
+				continue
+			last_patch_attrs[attr] = true
+			if attr == "class":
+				# Keep the classes that the control added.
+				el.set_attribute("class", UxmlParts.merged_class(el, "" if nv == null else String(nv)))
+			elif nv == null:
+				el.remove_attribute(attr)
+			else:
+				el.set_attribute(attr, String(nv))
+	_tree = tree
+	doc._restyle_now()
+	diagnostics = doc.diagnostics.duplicate()
+	patches += 1
+	last_was_patch = true
+	last_render_ms = (Time.get_ticks_usec() - t0) / 1000.0
+	rendered.emit()
+	return true
+
+
+## The source without the patchable attributes of mapped elements (each
+## whole attribute and the white space before it). Two sources with the
+## same skeleton differ only in those attributes: values, an attribute
+## added or removed, or the attribute order in a tag. "" when two
+## attribute spans overlap (no patch then).
+static func _skeleton_of(tree: EdUxmlSource, mapped: Dictionary) -> String:
+	var cuts: Array = []
+	var text := tree.text
+	for n in tree.nodes:
+		if not mapped.has(n.id):
+			continue
+		for a in n.attributes:
+			if PATCHABLE.has(a["name"]) and a["well_formed"]:
+				var start := int(a["start"])
+				while start > n.open_start and (text.unicode_at(start - 1) == 32 or text.unicode_at(start - 1) == 9 or text.unicode_at(start - 1) == 10 or text.unicode_at(start - 1) == 13):
+					start -= 1
+				cuts.append([start, int(a["end"])])
+	cuts.sort_custom(func(x, y): return x[0] < y[0])
+	var out := PackedStringArray()
+	var pos := 0
+	for c in cuts:
+		if c[0] < pos:
+			return ""
+		out.append(text.substr(pos, c[0] - pos))
+		pos = c[1]
+	out.append(text.substr(pos))
+	return "".join(out)
 
 
 ## UxmlDocument.load_source() with our resolver. Mirrors the godot-uxml
@@ -110,6 +205,7 @@ func _load_source(uxml: String, virtual_path: String, resolver: UxmlResourceReso
 func _map(tree: EdUxmlSource) -> void:
 	element_for_node.clear()
 	node_for_element.clear()
+	_hit_order = []
 	if doc._doc == null or doc._doc.root == null or tree == null:
 		return
 	var by_offset := {}
@@ -122,6 +218,11 @@ func _map(tree: EdUxmlSource) -> void:
 		if el != null and el.tag() == n.name:
 			element_for_node[n.id] = el
 			node_for_element[el] = n.id
+	var depth := {}
+	for id in element_for_node:
+		depth[id] = _depth(element_for_node[id])
+	_hit_order = element_for_node.keys()
+	_hit_order.sort_custom(func(a, b): return depth[a] > depth[b] or (depth[a] == depth[b] and a > b))
 
 
 ## The control that draws editor node `id`, or null (non-visual, hidden,
@@ -151,19 +252,13 @@ func rect_of(id: int) -> Rect2:
 ## each control (so rotate, scale and translate apply, as godot-uxml sets
 ## them on the Control transform) and of every clipping ancestor.
 func hit_test(point: Vector2) -> int:
-	var best := -1
-	var best_depth := -1
-	for id in element_for_node:
+	for id in _hit_order:
 		var c := control_of(id)
 		if c == null or not c.is_visible_in_tree():
 			continue
-		if not _hits(c, point):
-			continue
-		var depth := _depth(element_for_node[id])
-		if depth > best_depth or (depth == best_depth and id > best):
-			best = id
-			best_depth = depth
-	return best
+		if _hits(c, point):
+			return id
+	return -1
 
 
 ## True when `point` is inside `c` and inside every clipping ancestor

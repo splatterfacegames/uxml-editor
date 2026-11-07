@@ -1,43 +1,48 @@
-/* Inspector document (generated per selection). */
+/* Inspector document (a generated skeleton, updated in place). */
+
+.hidden {
+    display: none;
+}
+
+/* Keeps its space: a visibility change needs no layout. */
+.invisible {
+    visibility: hidden;
+}
 
 .inspector {
     flex-grow: 1;
     background-color: rgb(56, 56, 56);
 }
 
+/* Over the (invisible) content. */
 .empty {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
     margin: 12px;
     color: rgb(160, 160, 160);
     white-space: normal;
 }
 
-.title-row {
-    flex-direction: row;
-    align-items: flex-end;
-    padding-left: 8px;
-    padding-top: 8px;
-}
-
+/* The labels that change per selection have a fixed height and fill the
+   width, so a new text needs no layout. */
 .title {
+    height: 24px;
+    padding-left: 8px;
+    padding-top: 6px;
     font-size: 16px;
     -unity-font-style: bold;
     color: rgb(230, 230, 230);
-}
-
-.title-prefix {
-    color: rgb(140, 140, 140);
-    margin-left: 4px;
-}
-
-.title-name {
-    color: rgb(130, 180, 240);
-    margin-left: 6px;
+    overflow: hidden;
 }
 
 .subtitle {
+    height: 18px;
     color: rgb(140, 140, 140);
     padding-left: 8px;
     margin-bottom: 6px;
+    overflow: hidden;
 }
 
 .section {
@@ -59,12 +64,21 @@
     margin-bottom: 1px;
 }
 
-.field > .unity-label {
+.type-field > .unity-label {
     min-width: 120px;
     width: 120px;
 }
 
-.unset > .unity-label {
+.row-label {
+    width: 124px;
+    min-width: 124px;
+    height: 18px;
+    padding-left: 4px;
+    overflow: hidden;
+    -unity-text-align: middle-left;
+}
+
+.row-label.unset {
     color: rgb(150, 150, 150);
 }
 
@@ -105,6 +119,8 @@
 }
 
 .readout {
+    height: 18px;
+    overflow: hidden;
     padding-left: 4px;
     color: rgb(200, 200, 200);
 }

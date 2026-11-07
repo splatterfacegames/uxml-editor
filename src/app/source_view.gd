@@ -25,6 +25,8 @@ var _timer: Timer
 var _applying := false
 var _highlighter := EdSourceHighlighter.new()
 var _mark: Vector2i = Vector2i(-1, -1)
+## Typed text that is not a transaction yet.
+var _dirty := false
 
 
 func _init() -> void:
@@ -84,7 +86,9 @@ func reload_from_buffer(reset_view: bool = false) -> void:
 	var col := get_caret_column()
 	var vscroll := scroll_vertical
 	_applying = true
-	text = m.display
+	_dirty = false
+	if reset_view or _map == null or not _replace_changed(_map.display, m.display):
+		text = m.display
 	clear_undo_history()
 	_applying = false
 	_map = m
@@ -100,21 +104,65 @@ func reload_from_buffer(reset_view: bool = false) -> void:
 		mark_range(_mark.x, _mark.y, false)
 
 
+## Replace only the changed middle of the text (a whole-text set re-lays
+## out and highlights every line). `old` must be the current text.
+func _replace_changed(old: String, now: String) -> bool:
+	if text != old:
+		return false
+	var n := mini(old.length(), now.length())
+	# Common prefix and suffix lengths by bisection (native compares).
+	var lo := 0
+	var hi := n
+	while lo < hi:
+		var mid := (lo + hi + 1) / 2
+		if old.substr(0, mid) == now.substr(0, mid):
+			lo = mid
+		else:
+			hi = mid - 1
+	var a := lo
+	lo = 0
+	hi = n - a
+	while lo < hi:
+		var mid := (lo + hi + 1) / 2
+		if old.substr(old.length() - mid) == now.substr(now.length() - mid):
+			lo = mid
+		else:
+			hi = mid - 1
+	var b := lo
+	var from := _line_col(a)
+	var to := _line_col(old.length() - b)
+	begin_complex_operation()
+	if to != from:
+		remove_text(from.x, from.y, to.x, to.y)
+	var ins := now.substr(a, now.length() - b - a)
+	if not ins.is_empty():
+		insert_text(ins, from.x, from.y)
+	end_complex_operation()
+	return text == now
+
+
 func has_pending_edit() -> bool:
-	return not _timer.is_stopped()
+	return _dirty
 
 
 func _on_text_changed() -> void:
-	if _applying:
+	# TextEdit emits text_changed at the end of the frame, also after a
+	# programmatic change; the display copy tells the two apart.
+	if _applying or (_map != null and text == _map.display):
 		return
+	_dirty = true
 	_timer.start()
 
 
-## Turn the typed change into a transaction now.
+## Turn the typed change into a transaction now. (The pause timer calls
+## this too; a one-shot timer is already stopped when it times out, so the
+## pending state is a flag of its own.)
 func flush() -> void:
-	if _timer == null or _timer.is_stopped():
+	if not _dirty:
 		return
-	_timer.stop()
+	_dirty = false
+	if _timer != null:
+		_timer.stop()
 	if _map == null or _ws == null:
 		return
 	var patch = _map.to_buffer_patch(text)

@@ -8,6 +8,9 @@ extends RefCounted
 
 var workspace: EdWorkspace
 var entry_path: String = ""
+## style_paths() of one parse (the tree object) and buffer count.
+var _style_key: Array = []
+var _style_paths: Array = []
 
 
 func _init(ws: EdWorkspace = null, path: String = "") -> void:
@@ -39,10 +42,16 @@ func locator_for(node: EdUxmlNode) -> Dictionary:
 ## The stylesheet paths this document references with <Style src>, in
 ## document order, as workspace paths (see EdProjectPaths.resolve).
 func style_paths() -> Array:
+	var t := tree()
+	var key := [t, workspace.buffers.size()]
+	if key == _style_key:
+		return _style_paths.duplicate()
 	var out: Array = []
+	_style_key = key
+	_style_paths = out
 	var r := root()
 	if r == null:
-		return out
+		return out.duplicate()
 	for n in r.walk():
 		if n.local == "Style":
 			var src = n.get_attribute("src")
@@ -51,4 +60,4 @@ func style_paths() -> Array:
 			var p = EdProjectPaths.resolve(String(src), entry_path)
 			if p != null and workspace.has(p) and not out.has(p):
 				out.append(p)
-	return out
+	return out.duplicate()
