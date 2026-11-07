@@ -49,6 +49,8 @@ var _paths_by_key: Dictionary = {}
 var _texts: Dictionary = {}
 ## node id -> forced states, applied again after a full load.
 var forced: Dictionary = {}
+## The tree of the last map: the ids of `forced` name its nodes.
+var _mapped_tree: EdUxmlSource = null
 
 
 func _init() -> void:
@@ -83,6 +85,7 @@ func clear() -> void:
 	entry_path = ""
 	_texts.clear()
 	forced.clear()
+	_mapped_tree = null
 
 
 func is_loaded() -> bool:
@@ -198,21 +201,27 @@ func _after_load(ws: EdWorkspace, entry: String, kept: bool) -> void:
 	last_was_patch = kept
 	var model := doc.get_document_model()
 	diagnostics = doc.diagnostics.duplicate()
-	var old_forced := {}
+	var tree := ws.uxml(entry)
+	# The forced states stay with their elements. An edit of the structure
+	# gives the elements other ids: the locators find them again. A full
+	# load drops the forced states of godot-uxml.
+	var moved := {}
 	for id in forced:
-		var el = element_for_node.get(id)
-		if el != null:
-			old_forced[id] = forced[id]
-	_map(ws.uxml(entry), model)
-	# A full load drops the forced states of godot-uxml; replace_source()
-	# moves them. The editor keeps them by node id (the same source
-	# structure gives the same ids).
+		var n: EdUxmlNode = null
+		if _mapped_tree != null and id < _mapped_tree.nodes.size():
+			n = EdLocator.resolve(tree.root, EdLocator.create(_mapped_tree.nodes[id])) if tree != null and tree.root != null else null
+		if n != null:
+			moved[n.id] = forced[id]
+	_map(tree, model)
+	_mapped_tree = tree
 	forced = {}
-	for id in old_forced:
+	if not kept:
+		doc.clear_forced_states()
+	for id in moved:
 		if element_for_node.has(id):
-			forced[id] = old_forced[id]
+			forced[id] = moved[id]
 			if not kept:
-				doc.set_forced_states(element_for_node[id], PackedStringArray(old_forced[id]))
+				doc.set_forced_states(element_for_node[id], PackedStringArray(moved[id]))
 
 
 func _map(tree: EdUxmlSource, model: UxmlDocumentModel) -> void:
@@ -428,6 +437,12 @@ func set_forced(id: int, states: Array) -> void:
 	else:
 		forced[id] = kept
 	doc.set_forced_states(el, PackedStringArray(kept))
+
+
+## True when the element map comes from `tree`: the ids of the current parse
+## name the rendered elements. Between an edit and its render they do not.
+func is_mapped(tree: EdUxmlSource) -> bool:
+	return _mapped_tree == tree
 
 
 func forced_of(id: int) -> Array:

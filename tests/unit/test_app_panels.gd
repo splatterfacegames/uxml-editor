@@ -311,6 +311,35 @@ func test_a_new_rule_chosen_after_a_drag_gets_the_end_of_the_drag() -> void:
 	ok(not m.state.workspace.text(MENU_USS).contains("#quit-button"), "undo removes the rule")
 
 
+func test_the_picker_is_a_context_menu_of_the_inspector() -> void:
+	var m := await editor()
+	var n := await _select(m, "quit-button")
+	var c := _center(m, n)
+	await drag(m, c, c + Vector2(40, 0), 3)
+	await frames()
+	var menu := m.inspector.doc.get_context_menu()
+	ok(menu != null, "show_context_menu of the inspector document")
+	eq(menu, m.inspector.picker)
+	eq(menu.document().editor_theme, "always", "the look of the inspector")
+	ok(menu.document().get_element("item-%d" % m.inspector.pending_labels().size()) == null, "a separator before Cancel")
+	# A close without a choice cancels, as a click outside the menu.
+	var src := m.state.workspace.text(MENU)
+	ok(src != "")
+	m.inspector.doc.close_context_menu()
+	await frames(3)
+	ok(m.inspector.pending.is_empty(), "the question ended")
+	eq(m.state.workspace.history.undo_depth(), 0, "the drag is undone")
+	# A field helper menu too.
+	m.state.select_node(null, "test")
+	n = await _select(m, "quit-button")
+	var i := EdInspectorView.COMMON_STYLES.find("display")
+	m.inspector._on_button("pick-style-%d" % i)
+	await frames()
+	ok(m.inspector.doc.get_context_menu() != null, "a keyword menu")
+	m.inspector.doc.close_context_menu()
+	await frames()
+
+
 func test_cancel_undoes_the_drag() -> void:
 	var m := await editor()
 	var n := await _select(m, "quit-button")

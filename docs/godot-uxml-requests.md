@@ -22,22 +22,27 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R8 | P2 | done in `6137987` | Hit-test that respects transforms and clipping |
 | R9 | P2 | done in `6137987` | Catalog of supported elements and attributes |
 | R10 | P3 | done in `6137987` | Template instance of a cloned element |
-| R11 | P3 | partly done: `end_offset` in `6137987`; severity open | End offsets and a severity on every diagnostic |
+| R11 | P3 | done: `end_offset` in `6137987`, severity in `dc2c081` | End offsets and a severity on every diagnostic |
 | R12 | P2 | done in `6137987` | Drag and drop for collection items |
 | R13 | P3 | fixed in `6137987` | `background-image: none` on a checked ToolbarToggle |
 | R14 | P3 | done in `6137987` | Rectangle of an element in another element's space |
-| R15 | P2 | open (workaround: in-place updates) | Build cost of a document; text updates without a layout |
-| R16 | P3 | open (workaround) | Context menu at a point, in the look of the owner document |
+| R15 | P2 | text and `display` parts done in `dc2c081`; build cost open | Build cost of a document; text updates without a layout |
+| R16 | P3 | done in `dc2c081` | Context menu at a point, in the look of the owner document |
 | R17 | P3 | open (workaround) | Value updates of field controls without a restyle |
 | R18 | P3 | open (workaround) | Elide the placeholder of a text field |
 | R19 | P3 | open (workaround) | Runtime classes of an element; finish all transitions |
 | R20 | P3 | open (workaround) | Public easing, shorthand and elision helpers |
 | R21 | P3 | open (workaround) | A signal when a split view changes size |
+| R22 | P3 | open (workaround) | Text changes that are stable inside a ScrollView, and a unitless `flex-basis: 0` |
+| R23 | P3 | open (workaround) | A completed transition after an instant change stops a later run |
+| R24 | P3 | open (workaround) | The selected row of a list without focus in the editor skins |
+| R25 | P2 | open (workaround) | A stylesheet reload that restyles only what the edit can change |
+| R26 | P3 | open (workaround) | The transitions of a state change, without the change |
 
-The editor pins godot-uxml `6137987` (github.com/splatterfacegames/godot-uxml),
-which has R1-R14. The sections of the done requests give the final API
-and where the editor uses it. The open requests keep their workaround
-notes.
+The editor pins godot-uxml `dc2c081` (github.com/splatterfacegames/godot-uxml),
+which has R1-R14, R16, R11 and the text and `display` parts of R15. The
+sections of the done requests give the final API and where the editor uses
+it. The open requests keep their workaround notes.
 
 ## R1. Load from text with a caller resolver (P1, done)
 
@@ -244,72 +249,62 @@ targets), `border_start()` (the padding box in the element's own space;
 the computed-border workaround is gone) and `local_box_of()` (the canvas
 draws the rotated outline of a transformed element).
 
-## R11. End offsets and a severity on every diagnostic (P3, partly done)
+## R11. End offsets and a severity on every diagnostic (P3, done)
 
-Done in `6137987`: every diagnostic has `end_offset`. Open: a `severity`
-("error", "warning", "info") on each diagnostic.
+```gdscript
+UxmlDiagnostic.severity_of(kind: String) -> String   # "error", "warning" or "info"
+# Each diagnostic has `severity` and `end_offset`.
+```
 
-**Workaround (severity).** `EdDiagnostics.severity_of()` maps the kinds:
-`malformed`, `import-*`, `missing-file`, `path-outside-root`,
-`malformed-reference` and `template-*` are errors, `version-dependent` is
-info, the others are warnings. `EdDiagnostics.range_end()` stays as the
-fallback for a diagnostic without `end_offset`.
+**Editor use.** `EdDiagnostics.collect()` reads `severity` and `end_offset`
+of each diagnostic. The map of the kinds in the editor is gone.
+`EdDiagnostics.range_end()` stays for a diagnostic whose `end_offset` equals
+its `offset` (no source text).
 
-## R15. Build cost of a document; text updates without a layout (P2)
+## R15. Build cost of a document; text updates without a layout (P2, partly done)
 
-Measured on the editor inspector, a generated document of 310 controls
-(rows of `TextField` and `Button` in `Foldout` sections, editor theme):
+Done in `dc2c081`:
 
-| Step | Native | GDScript |
-| --- | --- | --- |
-| `_index()` (build the controls) | 160-290 ms | 430-460 ms |
-| first `_restyle_now()` | 120-160 ms | 430-550 ms |
-| a `display` change of one row (restyle and layout) | 6 ms, then 12 ms in the next frame | 60 ms, then 90 ms in the next frame |
-| a `label` change of one `TextField` | 4 ms | 70 ms |
-| a paint-only class change (`color`) | 1.4 ms | 10 ms |
-| `visibility` change | 1 ms | 4 ms |
+- A text change (`set_text`, a model `text` attribute) lays out only when the
+  text can move an element. `var layout_count: int` counts the layout passes.
+- A model `text` change reaches a Label or a Button control.
+- A `display` change is one layout pass. The first interaction after a load
+  has no settling layout.
 
-A 507-element document (12 panels of labels, buttons, toggles and text
-fields) loads in about 850 ms on the native path.
+**Editor use.** `EdUi.set_label()` calls `set_text()`. The direct write to the
+Label control and the elision copy of the editor are gone. A label needs a
+size that does not follow its text (request R22).
 
-Requests:
+**Open: the build cost per control.** `load_document` is unchanged: about 0.5
+ms native and 1.5 ms GDScript per control. The editor inspector (310 controls)
+is built once and changes in place.
 
-1. Lower the build cost per control (about 0.5 ms native and 1.5 ms
-   GDScript per control today).
-2. `UxmlDocument.set_text()` lays out the whole document. A Label whose
-   size does not depend on its text (fixed width, or stretched by its
-   parent) needs no layout.
-3. A `text` change of the model (`UxmlElement.set_attribute("text", ...)`)
-   is not applied to a Label or a Button control. `label` on a field is.
-4. A `display` change lays out twice (the second pass in the next frame,
-   `_unsettled`).
+**Workaround of the `display` layout.** One layout pass of the inspector costs
+about 7 ms native and 60 ms GDScript. `EdInspectorView._compact()` keeps every
+row in the layout: a row that is not in use is `visibility: hidden`, and the
+content below moves up with `translate` (a paint-only property). The cost is
+scroll room below the last section: at most the unused rows.
 
-**Workaround.** The inspector builds its document once and changes it in
-place (`EdInspectorView`): values and placeholders go straight to the
-`LineEdit` controls, labels of fixed size straight to the `Label`
-controls (`EdUi.set_label()`), and the model attributes change without a
-change notification (`EdUi.set_silent()`). Rows that are not in use are
-`visibility: hidden`, so a new selection needs no layout. Window labels
-that change often (status, history, source state, zoom) have a size that
-does not depend on the text, for the same fast path.
-
-## R16. Context menu at a point (P3)
+## R16. Context menu at a point (P3, done)
 
 ```gdscript
 # UxmlDocument
-## A menu at `global_point` with `items` (Unity DropdownMenu /
-## ContextualMenuManipulator). Emits menu_chosen(index). The menu uses the
-## theme and the editor skin of this document.
-func show_context_menu(global_point: Vector2, items: PackedStringArray) -> void
+signal menu_chosen(index)
+func show_context_menu(global_point: Vector2, items) -> UxmlPopupMenu
+func get_context_menu() -> UxmlPopupMenu
+func close_context_menu() -> void
+func set_context_menu(element: UxmlElement, populate: Callable) -> void
 ```
 
-**Use case.** The hierarchy context menu (the Edit commands).
+**Editor use.** The hierarchy has `set_context_menu`, and the Edit commands
+run from `menu_chosen`. The write-target questions and the helper menus of the
+inspector use `show_context_menu`. The anchor `Control` of `UxmlPopupMenu.open`
+is gone.
 
-**Workaround.** `UxmlPopupMenu.open()` under a `Control` anchor at the
-pointer (its width sets the menu width). The menu takes the theme path of
-the shell document but not its editor theme and skin, so it has the
-runtime look in the editor window (the same as the menus of `ToolbarMenu`
-elements).
+**Visual check.** In a real window (`docs/screenshots/m5-context-menu.png`,
+`m4-target-picker.png`), and with a checked, a disabled, a hovered and a long
+item, and at the corner of the window: the editor skin, the checkmark column,
+separators, the hover colour, and the menu stays inside the window. No defect.
 
 ## R17. Value updates of field controls without a restyle (P3)
 
@@ -329,7 +324,9 @@ colour swatch is a tinted button.
 
 **Workaround.** Text values go to the `LineEdit` controls (`EdUi`);
 Toggle values (the state preview) go through the model; the colour
-swatch is the `self_modulate` of a Button control.
+swatch is the `self_modulate` of a Button control. A Toggle value costs one
+layout of the inspector: a node of the state-machine panel costs 13 ms native
+and 60 ms GDScript on the menu fixture.
 
 ## R18. Elide the placeholder of a text field (P3)
 
@@ -392,3 +389,91 @@ signal split_changed(view_name: String, dimension: float)  # at the end of a dra
 **Workaround.** `EdMain.save_splits()` reads `get_split_dimension()` of the
 seven views after each release of the left mouse button, and at close.
 
+## R22. Text changes that are stable inside a ScrollView; a unitless `flex-basis: 0` (P3)
+
+`_text_stable` treats two cases as "the text can move an element", so a
+`set_text()` lays out the whole document (on the inspector: 4.4 ms native,
+30 ms GDScript per selection):
+
+1. A Label that stretches across a column inside a ScrollView. The content
+   container of a ScrollView is not definite on its cross axis, also without a
+   horizontal scroller.
+2. `flex-basis: 0`. `_is_px()` needs the unit; only `0px` counts.
+
+Request: a ScrollView without horizontal scrolling has a definite content
+width; `0` counts as a length.
+
+**Workaround.** Each text line of the inspector is a Label with `flex-basis:
+0px` in a row (`.line` in `inspector.uss`). The sheets of the editor write
+`0px`.
+
+## R23. A completed transition after an instant change stops a later run (P3)
+
+`UssTransitions._start` keeps a completed transition per element and property.
+A later change with `combined <= 0` returns before it removes the entry, so a
+later change to the same end value starts nothing:
+
+```
+.a { min-width: 100px; transition: min-width 1s; }
+.a:checked { min-width: 300px; transition-duration: 0s; }
+hover -> normal (completes to 100px), normal -> checked (instant),
+checked -> normal: no transition starts (the entry still says 100px).
+```
+
+**Use case.** A run of the timeline after other runs of the same element shows
+no track. CSS removes a completed transition when the after-change style
+differs from its end value.
+
+**Workaround.** None. Another selection or a render starts clean; the edge of
+the state-machine panel keeps its kind, and the timeline says that no
+transition runs.
+
+## R24. The selected row of a list without focus in the editor skins (P3)
+
+`.unity-collection-view__item--selected` is `rgb(174, 174, 174)` in
+`unity-default-containers.uss`, and the editor skins do not override it. With
+the light text of the dark skin, the row is hard to read. The Unity dark skin
+uses `rgb(77, 77, 77)`.
+
+**Workaround.** A rule in `editor_shell.uss` for `.panel-list`.
+
+## R25. A stylesheet reload that restyles only what the edit can change (P2)
+
+`reload_stylesheet()` rebuilds the cascade and applies every control again. On
+the 507-element document:
+
+| Step of the render after one `transition-delay` edit | Native | GDScript |
+| --- | --- | --- |
+| `reload_stylesheet` and the element map | 157 ms | |
+| the restyle that the next `get_transitions` runs, and the arm of the run | 128 ms | |
+| the whole frame | 312-408 ms | 1090 ms |
+
+The same edit on the menu fixture: 14 ms native, 18 ms GDScript.
+
+Request: when only declarations change and the selectors stay, keep the rule
+matches and restyle only the elements of those rules. A change of only
+`transition-*` declarations needs no apply and no layout.
+
+**Workaround.** A timeline bar drag writes once, at its end, and the render
+waits for a pause of 0.4 s (`EdMain.RELOAD_PAUSE`). The canvas shows the new
+values through the model until then (`EdTransitionPlayer.set_preview`). The
+frame of the render itself still costs what this table says.
+
+## R26. The transitions of a state change, without the change (P3)
+
+```gdscript
+# UxmlDocument
+## What get_transitions() would list after a change of `element` from
+## `from_states` to `to_states`, without the change.
+func preview_transitions(element: UxmlElement, from_states: PackedStringArray, to_states: PackedStringArray) -> Array
+```
+
+**Use case.** The state-machine panel draws an edge with a transition
+differently from an instant change.
+
+**Workaround.** `EdStateMachine` compares the computed values of the two states
+(`explain_style`), reads the `transition-*` values of the state that the change
+goes to, and treats `auto`, `none` and an unset value as instant, as
+`UssTransitions._start` does. Limits: a property that only the theme changes
+counts only when `transition-property` names it, not through `all`. A test
+compares the kinds with real runs.

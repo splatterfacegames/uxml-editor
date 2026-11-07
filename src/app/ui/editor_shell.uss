@@ -92,6 +92,13 @@
     background-color: rgb(48, 48, 48);
 }
 
+/* The selected row of a list without focus: the value of the Unity dark skin.
+   The editor skins of godot-uxml keep the light value of the runtime theme
+   (request R24). */
+.panel-list .unity-collection-view__item--selected {
+    background-color: rgb(77, 77, 77);
+}
+
 /* A long row elides; the tooltip has the whole text. */
 .panel-list .unity-label {
     flex-grow: 1;
@@ -208,8 +215,15 @@
     margin-right: 2px;
 }
 
+/* A narrow timeline (the state-machine panel is open): the header wraps, and
+   the From and To fields keep a readable width. */
+.timeline-bar {
+    flex-wrap: wrap;
+}
+
 .tl-cond {
     width: 180px;
+    min-width: 120px;
     flex-shrink: 1;
     margin-top: 1px;
     margin-bottom: 1px;
@@ -239,4 +253,50 @@
 
 .tl-tracks {
     background-color: rgb(44, 44, 44);
+}
+
+/* Milestone 7: the state-machine panel. */
+.hidden {
+    display: none;
+}
+
+.states-closed > #unity-dragline-anchor {
+    display: none;
+}
+
+.sm-header {
+    width: 58px;
+    flex-shrink: 0;
+}
+
+.sm-target {
+    flex-grow: 1;
+    flex-basis: 0px;
+    -unity-text-align: middle-left;
+    color: rgb(170, 170, 170);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sm-graph {
+    background-color: rgb(44, 44, 44);
+}
+
+.sm-info-row {
+    flex-direction: row;
+    flex-shrink: 0;
+    height: 18px;
+    background-color: var(--header-bg);
+    border-top-width: 1px;
+    border-top-color: var(--panel-border);
+}
+
+.sm-info {
+    flex-grow: 1;
+    flex-basis: 0px;
+    padding-left: 6px;
+    -unity-text-align: middle-left;
+    color: rgb(180, 180, 180);
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

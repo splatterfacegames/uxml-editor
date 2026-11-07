@@ -1,8 +1,8 @@
 class_name EdSettings
 extends RefCounted
 ## Per-user editor settings in a ConfigFile (default
-## `user://settings.cfg`): the sizes of the window panes and the timeline
-## options. `user://` is a directory of the operating system user, so each
+## `user://settings.cfg`): the sizes of the window panes, the timeline
+## options and the state of the panels. `user://` is a directory of the operating system user, so each
 ## user keeps their own layout.
 ##
 ## The test runner and the benchmark point `default_path` at a test file,

@@ -30,6 +30,7 @@
       <uie:ToolbarToggle name="snap-toggle" text="Snap" value="true" tooltip="Snap moves and resizes to siblings, the parent and the grid (Alt or Ctrl while dragging turns snapping off)" />
       <uie:ToolbarMenu name="grid-menu" text="Grid 8 px" tooltip="Pixel grid for snapping" />
       <uie:ToolbarToggle name="preview-toggle" text="Preview" tooltip="Send mouse and keyboard input to the document (Ctrl+P)" />
+      <uie:ToolbarToggle name="states-toggle" text="States" tooltip="Show the state-machine panel: the interaction states of the selection" />
       <uie:ToolbarSpacer class="grow" />
       <ui:Label name="document-label" class="document-label" text="No project" />
     </uie:Toolbar>
@@ -61,6 +62,18 @@
             <ui:VisualElement name="canvas-host" class="host grow" />
           </ui:VisualElement>
           <ui:TwoPaneSplitView name="lower-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="150">
+          <ui:TwoPaneSplitView name="states-split" fixed-pane-index="0" fixed-pane-initial-dimension="0" class="grow states-closed">
+          <ui:VisualElement name="sm-panel" class="panel hidden">
+            <ui:VisualElement class="panel-header-row">
+              <ui:Label class="panel-header sm-header" text="States" />
+              <ui:Label name="sm-target" class="sm-target" text="" />
+              <uie:ToolbarButton name="sm-close" class="tl-button" text="×" tooltip="Close the panel. The canvas shows the state of the source again." />
+            </ui:VisualElement>
+            <ui:IMGUIContainer name="sm-graph" class="grow sm-graph" tooltip="A click on a state forces it on the canvas. A click on an arrow plays the change. Filled: rules style the state. Dashed: no rule. A solid arrow has a transition; a dashed arrow is instant." />
+            <ui:VisualElement class="sm-info-row">
+              <ui:Label name="sm-info" class="sm-info" text="" />
+            </ui:VisualElement>
+          </ui:VisualElement>
           <ui:VisualElement name="timeline-panel" class="panel">
             <ui:VisualElement class="panel-header-row timeline-bar">
               <ui:Label class="panel-header timeline-header" text="Timeline" />
@@ -80,6 +93,7 @@
             </ui:VisualElement>
             <ui:IMGUIContainer name="tl-tracks" class="grow tl-tracks" />
           </ui:VisualElement>
+          </ui:TwoPaneSplitView>
           <ui:VisualElement class="panel">
             <ui:VisualElement class="panel-header-row">
               <ui:Label class="panel-header" text="Source" />

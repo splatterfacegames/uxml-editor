@@ -29,6 +29,10 @@ extends RefCounted
 ##   easing          the easing picker of the timing function
 ##   canvas-picker   the write-target picker at the end of a canvas drag
 ##   narrow          a narrow inspector: long texts elide
+##   states-node     the state-machine panel: the hover state forced, its
+##                   rules in the declaration list
+##   states-edge     the state-machine panel: normal to hover plays on the
+##                   timeline, paused in the middle
 ## The stages tabs, recovery, conflict and the timeline stages work on a
 ## copy of the menu fixture in user://demo-* (they write files).
 
@@ -207,6 +211,24 @@ static func stage(m: EdMain, demo: String) -> void:
 			m.layout.update("move", Vector2(40, 12), false, true)
 			await _frames(tree, 3)
 			m.layout.finish(false)
+		"states-node":
+			_open_transitions(m, "demo-states")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			m.states.set_open(true)
+			await _frames(tree, 4)
+			m.states.select_node("hover")
+			# The transitions of the state end.
+			await tree.create_timer(1.6).timeout
+		"states-edge":
+			_open_transitions(m, "demo-states")
+			await _frames(tree, 3)
+			_select(m, "quit-button")
+			m.states.set_open(true)
+			await _frames(tree, 4)
+			m.states.select_edge("normal>hover")
+			m.timeline.seek_to(0.6)
+			await _frames(tree, 3)
 		"narrow":
 			m.shell.set_split_dimension("right-split", 300.0)
 			var long_rule := ".menu-button, .menu-button.primary, .menu-root > .menu-button {\n  max-width: 400px;\n}\n"

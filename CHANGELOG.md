@@ -21,6 +21,42 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Added (Godot rebuild, milestone 7)
+
+- State-machine panel, with the **States** toggle of the toolbar: the
+  interaction states of the selection as nodes, the state changes as arrows.
+  A state without rules has a dashed outline. An arrow with a transition is
+  solid, an instant change is dashed.
+- A click on a state forces it on the canvas and shows the declarations of its
+  rules in the inspector. A click on an arrow plays the change on the timeline.
+  Another selection, closing the panel, preview and another document give the
+  state preview its states back.
+- `EdStateMachine` builds the graph from the cascade of godot-uxml.
+
+### Changed (Godot rebuild, pin `dc2c081`)
+
+- godot-uxml moved to `dc2c081` (requests R15, R16, R11).
+- The hierarchy menu and the menus of the inspector are godot-uxml context menus
+  in the editor skin, with separators. The anchor controls are gone.
+- The diagnostics use the severity and the range of godot-uxml.
+- Text goes through `set_text`. The direct writes to the Label controls and the
+  copy of the elision are gone.
+- A change of the number of classes or extra rows needs no layout of the
+  inspector: the content below moves with `translate`. Selection on the menu
+  fixture: 16.2 -> 10.0 ms native, 111 -> 16.6 ms GDScript.
+- A timeline bar drag writes once, at its end. The run shows the value during
+  the drag, and the stylesheet reload waits for a pause. A frame of a bar drag on
+  the large document: p95 425 -> 32 ms native.
+- The timeline header wraps in a narrow pane, and the From and To fields keep a
+  readable width.
+
+### Fixed (Godot rebuild, pin `dc2c081`)
+
+- The easing label of a timeline bar has a band under the text: the curve no
+  longer crosses the label.
+- A forced state stays with its element when an edit changes the node ids.
+- The selected row of a list without focus is readable (workaround of R24).
+
 ### Added (Godot rebuild, milestone 6 and panel layout)
 
 - Transitions play on the canvas: a state toggle of the state preview or

@@ -128,8 +128,18 @@ message. Such an edit changes no file and adds no undo step.
 - **Edits on the timeline.** A drag of a bar changes `transition-delay`.
   A drag of the right end of a bar changes `transition-duration`. A
   double-click on a bar opens the easing picker. The edit uses the write
-  targets of the inspector and is one undo step. Alt or Ctrl during a drag
-  turns off the snap to 0.05 s. Escape cancels the drag.
+  targets of the inspector and is one undo step. The drag writes the file text
+  at its end. During the drag the canvas shows the new time. Alt or Ctrl during
+  a drag turns off the snap to 0.05 s. Escape cancels the drag.
+- **State machine.** The **States** toggle opens a panel beside the timeline.
+  The panel shows the states of the selected element: normal, hover, pressed,
+  focused, checked and disabled. A filled state has rules, with the number of
+  rules. A dashed state has no rule. An arrow is a change between two states. A
+  solid arrow has a transition. A dashed arrow is instant. Click a state to
+  force the state on the canvas and show the declarations of its rules in the
+  inspector. Click an arrow to play the change on the timeline. Up and Down step
+  through the states. Escape, a click on the empty graph, another selection and
+  closing the panel release the state.
 - **Easing.** The inspector shows the curve of
   `transition-timing-function`. A click on the curve or on the **∿** button
   opens a picker with the curve of every Unity easing keyword.
@@ -159,8 +169,7 @@ message. Such an edit changes no file and adds no undo step.
   Select a diagnostic to select its range in the source view and its
   element in the canvas and the hierarchy.
 
-`docs/roadmap.md` lists the next milestones: the state-machine panel and
-the web export.
+`docs/roadmap.md` lists the next milestone: packaging and the web export.
 
 ## Screenshots
 
@@ -186,6 +195,8 @@ the web export.
 | `docs/screenshots/m6-easing-picker.png` | The easing picker with the curve of every Unity keyword. |
 | `docs/screenshots/m6-canvas-target-picker.png` | The write-target menu at the end of a canvas drag. |
 | `docs/screenshots/m6-narrow-inspector.png` | A narrow inspector: long class rules and value origins end in `...`. |
+| `docs/screenshots/m7-state-node.png` | The state-machine panel: `hover` forced on a button, its rules in the inspector. A dashed state has no rule. |
+| `docs/screenshots/m7-state-edge.png` | The state-machine panel: the change from normal to hover plays on the timeline, paused at 0.6 s. |
 
 ## Requirements
 
@@ -224,11 +235,11 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
 | `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
 | `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
-| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states`, `classes`, `timeline`, `timeline-classes`, `easing`, `canvas-picker` or `narrow`. |
+| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states`, `classes`, `timeline`, `timeline-classes`, `easing`, `canvas-picker`, `narrow`, `states-node` or `states-edge`. |
 | `--gdscript` | Use the GDScript path of godot-uxml (no native core). |
 | `--recovery-dir=<dir>` | Keep the recovery journals in this directory (default `user://recovery`). |
 | `--watch-interval=<seconds>` | Set the time between disk checks (default 2; 0 turns the timer off). |
-| `--settings=<file>` | Keep the pane sizes and the timeline options in this file (default `user://settings.cfg`). |
+| `--settings=<file>` | Keep the pane sizes, the timeline options and the state of the panels in this file (default `user://settings.cfg`). |
 | `--ready-file=<path>` | Write this file after the options ran (tests). |
 | `--exit-after=<seconds>` | Stop the editor after this time (tests). |
 

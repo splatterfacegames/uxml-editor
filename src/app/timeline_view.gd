@@ -216,6 +216,16 @@ func run(from: Dictionary, to: Dictionary, autoplay: bool = false) -> void:
 	_redraw()
 
 
+## The forced states of the selection changed outside the timeline (the
+## state-machine panel): From and To follow, without a run.
+func states_forced() -> void:
+	if node_id < 0 or player.armed or _custom_states:
+		return
+	_default_states()
+	_refresh_menus()
+	_refresh_header()
+
+
 ## End the run: the canvas shows the source and the state preview again.
 func stop() -> void:
 	if flush_render.is_valid():

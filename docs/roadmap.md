@@ -6,12 +6,13 @@ render, pan, zoom, selection and hit-test, the hierarchy, the source view
 in sync, one undo history, inspector v1 (attributes and inline styles),
 revision-checked saves.
 
-Milestones 2, 3, 4, 5 and 6 (done on the `godot` branch): see the sections
+Milestones 2, 3, 4, 5, 6 and 7 (done on the `godot` branch): see the sections
 below. Screenshots: `docs/screenshots/m2-*.png`, `m3-*.png`, `m4-*.png`,
-`m5-*.png` and `m6-*.png`. Milestone 5 came before milestone 4, after a frame-cost
+`m5-*.png`, `m6-*.png` and `m7-*.png`. Milestone 5 came before milestone 4, after a frame-cost
 pass (see "Frame cost" below). Before milestone 4 the pin moved to
 godot-uxml `6137987` (requests R1-R14), and the editor replaced every
-workaround with the godot-uxml editor APIs (see "Re-pin" below).
+workaround with the godot-uxml editor APIs (see "Re-pin" below). Before
+milestone 7 the pin moved to `dc2c081` (R15, R16, R11).
 
 The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
@@ -255,14 +256,94 @@ out the inspector. The scenario `selection, same number of classes` needs no
 such layout: 13 ms native, 22 ms GDScript, against 23 ms and 132 ms for
 the mixed scenario in the same runs. The two runs show request R15, item 4.
 
-## M7. State-machine panel
+## Re-pin to godot-uxml dc2c081 and two cost fixes (done)
 
-- A panel that lists the interaction states of a control (normal, hover,
-  pressed, focused, checked, disabled) as nodes, and the USS rules that
-  style each state as edges. Selecting a node forces the state (R6) and
-  opens the rules in the provenance inspector. Selecting an edge plays the
-  transition between the two states on the timeline
-  (`EdTimelineView.run`).
+The pin moved from `6137987` to `dc2c081` (R15, R16, R11). The context menus
+use `show_context_menu` and `set_context_menu`, the diagnostics the severity
+and the range of godot-uxml, and text goes through `set_text`.
+
+`bench/frame_cost.gd`, one run per path, in ms per frame: at the old pin ->
+at the new pin -> with the fixes.
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| selection, median | 16.2 -> 15.2 -> 10.0 | 111 -> 82.0 -> 16.6 | 20.6 -> 20.0 -> 17.9 | 120 -> 98.3 -> 62.3 |
+| selection, same number of classes, median | 9.3 -> 10.9 -> 8.3 | 18.9 -> 49.3 -> 14.1 | 20.1 -> 19.4 -> 17.3 | 121 -> 98.7 -> 62.4 |
+| layouts of the inspector per 60 selections (new pin -> fixes) | 106 -> 0 | 106 -> 0 | 93 -> 0 | 93 -> 0 |
+| bar drag, frames that write, p95 | 22.2 -> 17.6 -> 4.9 | 33.0 -> 21.2 -> 10.4 | 425 -> 319 -> 31.8 | 1459 -> 1088 -> 294 |
+| the release of a bar drag, worst frame (fixes) | 2.0 | 5.4 | 1.8 | 5.5 |
+| the render after the pause, worst frame (fixes) | 15.0 | 19.6 | 315 | 1094 |
+| timeline: scrub, median | 2.35 -> 2.35 -> 2.33 | 4.95 -> 7.17 -> 6.66 | 2.62 -> 2.14 -> 2.14 | 4.94 -> 5.91 -> 6.34 |
+| drag (move), median | 12.3 -> 11.9 -> 12.1 | 17.3 -> 15.6 -> 15.8 | 40.6 -> 28.9 -> 28.7 | 42.3 -> 29.6 -> 29.5 |
+
+The "new pin" column has `set_text` in place of the direct writes: the
+same-number case on GDScript went up to 49 ms, because the labels of the
+inspector counted as text that can move an element (R22). The fix puts them in
+rows.
+
+- **Selection.** A change of the number of classes or extra rows needs no
+  layout now: the rows stay in the layout, and the content below moves up with a
+  paint-only `translate` (`EdInspectorView._compact`). The first selection of a
+  run has the old maximum: the first restyle after a load.
+- **Bar drag.** The write cost, on the large document, native: the edit and the
+  patch under 4 ms, `reload_stylesheet` and the element map 157 ms, the arm of
+  the run with the restyle 128 ms. A drag now writes once, at its end, and the
+  run shows the value through the model during the drag. The render waits for a
+  pause of 0.4 s (`EdMain.RELOAD_PAUSE`). Targets: under 16 ms on the menu
+  fixture (reached: 4.9 ms in the drag, 2.0 ms at the release, 15.0 ms for the
+  render); no frame over 100 ms on the large document in the gesture (reached:
+  35 ms in the drag, 1.8 ms at the release). The render after the pause is over
+  the target on the large document: 315 ms, with no gesture running. The cost is
+  in `reload_stylesheet` (request R25).
+
+## M7. State-machine panel (done)
+
+Done:
+
+- **Panel.** The **States** toggle of the toolbar opens the panel beside the
+  timeline. The state of the panel and its width are kept per user. The panel
+  is closed by default and costs nothing while it is closed.
+- **Nodes.** normal, hover, pressed, focused, checked, disabled. A state with
+  rules is filled and has the number of rules; a state without rules has a
+  dashed outline. A dot marks the state that the canvas shows. `:selected` is
+  the old name of `:checked`, so one node has both.
+- **Edges.** One arrow per direction, for normal and hover, hover and pressed,
+  normal and focused, normal and checked, normal and disabled, when the far
+  state has rules. A solid blue arrow has a transition, with its time when lit;
+  a dashed grey arrow is instant; a faint arrow changes no value. The transition
+  comes from the state that the change goes to.
+- **Selection.** A click on a node forces the state (R6) and shows the
+  declarations of its rules in the declaration list of the inspector, with the
+  status of each and a jump to the source. A click on an arrow plays the change
+  on the timeline (`EdTimelineView.run`). Up and Down step through the states.
+  A click on the empty graph or Escape ends the selection.
+- **Sync.** A render builds the graph again, so a source edit, an undo and a
+  redo show at once. The forced state stays with its element when an edit of
+  the source changes the ids. Another selection, closing the panel, preview and
+  another document give the state preview its states back. A toggle of the state
+  preview takes the state over.
+
+Not done: a graph edit (a new state rule from the panel); an edge between two
+states other than the listed pairs (a state with two forced states is a run of
+the timeline, with From and To as text); states on an ancestor
+(`.a:hover .b`).
+
+### M7 frame cost
+
+`bench/frame_cost.gd`, median (p95), in ms per frame.
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| states: idle, open | 0.08 (0.09) | 0.07 (0.08) | 0.08 (0.12) | 0.08 (0.09) |
+| states: selection, panel open | 11.3 (15.8) | | 18.2 (21.5) | |
+| states: selection, panel closed | 9.81 (16.4) | | 16.2 (19.6) | |
+| states: one build of the graph | 2.76 (3.34) | | 2.86 (3.08) | |
+| states: force a node, one per frame | 13.2 (15.8) | 60.2 (68.7) | 20.5 (24.2) | 202 (213) |
+| states: play an edge, one per frame | 11.5 (13.1) | 21.9 (24.2) | 24.3 (27.0) | 160 (164) |
+| states: hover over the graph | 0.19 (1.00) | 0.18 (3.96) | 0.19 (1.11) | 0.19 (4.24) |
+
+A build waits for a frame without a change, so a run of selections builds once.
+A node costs one layout of the inspector through the state toggles (R17).
 
 ## M8. Packaging and the web export
 

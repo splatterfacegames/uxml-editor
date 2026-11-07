@@ -100,6 +100,10 @@ var _coalesce := 0
 var _easing_shown := ""
 ## Rows that are not in use: {class, attr, style} (_compact).
 var _unused: Dictionary = {}
+## The rules of a state in the declaration list (the state-machine panel):
+## {title, rows}, or {}.
+var _state_rules: Dictionary = {}
+var _scroll_rules := false
 var easing_picker: EdEasingPicker = null
 ## field -> the placeholder before elision.
 var _placeholder_full: Dictionary = {}
@@ -146,6 +150,13 @@ func _rebuild() -> void:
 	if _focus_type:
 		_focus_type = false
 		focus_type_field()
+	if _scroll_rules:
+		_scroll_rules = false
+		_scroll_to_rules.call_deferred()
+
+
+func _scroll_to_rules() -> void:
+	doc.scroll_to("scroll", "prov-section")
 
 
 ## The write-target choices stay for the selection and the states of the
@@ -315,6 +326,9 @@ func _class_rules(n: EdUxmlNode, cls: String) -> Array:
 func _refresh_provenance() -> void:
 	provenance = []
 	targets = []
+	if not _state_rules.is_empty():
+		provenance = _state_rules["rows"]
+		return
 	if focused_property.is_empty() or _node == null or _host == null:
 		return
 	var entries := _host.explain(_node.id, EdProvenance.longhand_of(focused_property), _states_dict())
@@ -324,12 +338,37 @@ func _refresh_provenance() -> void:
 
 ## Show the declarations of style property `property`.
 func show_property(property: String) -> void:
-	if property == focused_property:
+	if property == focused_property and _state_rules.is_empty():
 		return
 	focused_property = property
+	_state_rules = {}
 	if not _pending:
 		_pending = true
 		_rebuild.call_deferred()
+
+
+## Show the declarations of the rules of a state in the declaration list
+## (EdStateMachine.rows). `scroll`: the list comes into view. A style field
+## with the focus shows its property again.
+func show_state_rules(title: String, rows: Array, scroll: bool = false) -> void:
+	_state_rules = {"title": title, "rows": rows}
+	_scroll_rules = _scroll_rules or scroll
+	if not _pending:
+		_pending = true
+		_rebuild.call_deferred()
+
+
+func clear_state_rules() -> void:
+	if _state_rules.is_empty():
+		return
+	_state_rules = {}
+	if not _pending:
+		_pending = true
+		_rebuild.call_deferred()
+
+
+func shows_state_rules() -> bool:
+	return not _state_rules.is_empty()
 
 
 ## The value hint of an unset attribute: the enum choices or the default
@@ -600,7 +639,9 @@ func _class_rows(rows: Array) -> void:
 
 
 func _provenance_rows(rows: Array, choices: Array) -> void:
-	if focused_property.is_empty():
+	if not _state_rules.is_empty():
+		_text("prov-title", String(_state_rules["title"]))
+	elif focused_property.is_empty():
 		_text("prov-title", "A style field with the focus lists its declarations here.")
 	else:
 		var lh := EdProvenance.longhand_of(focused_property)
@@ -613,7 +654,7 @@ func _provenance_rows(rows: Array, choices: Array) -> void:
 		# Unused rows are invisible, not hidden: no layout per selection.
 		_hide("prov-%d" % i, "link prov", false, "status-" + status if used else "invisible")
 		if used:
-			var t := EdProvenance.line(r, EdProvenance.longhand_of(focused_property))
+			var t := EdProvenance.line(r, "" if not _state_rules.is_empty() else EdProvenance.longhand_of(focused_property))
 			if i == PROV_ROWS - 1 and rows.size() > PROV_ROWS:
 				t = "… and %d more" % (rows.size() - PROV_ROWS + 1)
 			_text("prov-%d" % i, t)
@@ -624,7 +665,7 @@ func _provenance_rows(rows: Array, choices: Array) -> void:
 	for c in choices:
 		if c["id"] == sticky:
 			picked = c["label"]
-	_text("prov-targets", "" if focused_property.is_empty() else
+	_text("prov-targets", "" if focused_property.is_empty() or not _state_rules.is_empty() else
 		("Writes to: " + picked if not picked.is_empty() else "Write targets: " + ("none" if labels.is_empty() else "; ".join(labels))))
 
 

@@ -91,6 +91,7 @@ func _run() -> void:
 
 	if only_timeline:
 		await _timeline_scenarios(entry)
+		await _state_scenarios()
 		_print_table()
 		await _finish()
 		return
@@ -144,6 +145,7 @@ func _run() -> void:
 	await _wait(3)
 	print("history after the drag: %s" % _m.state.workspace.history.undo_label())
 	await _timeline_scenarios(entry)
+	await _state_scenarios()
 	_print_table()
 	await _finish()
 
@@ -271,6 +273,52 @@ func _measure(label: String, step: Callable, seconds: float = 0.0) -> void:
 	var now := _now_counts()
 	_rows.append([label, med, p95, times[-1], now[0] - _counts[0], now[1] - _counts[1], now[2] - _counts[2], now[3] - _counts[3], now[4] - _counts[4]])
 	_counts = now
+
+
+## The state-machine panel, open, on the rules of the timeline scenarios.
+func _state_scenarios() -> void:
+	var sm := _m.states
+	sm.set_open(true)
+	await _wait(5)
+	var nodes := _drawn()
+	var target: EdUxmlNode = null
+	for n in nodes:
+		if n.local == "Button":
+			target = n
+			break
+	_m.state.select_node(target, "canvas")
+	await _wait(3)
+	await _measure("states: idle, open", func(_i): pass)
+	await _measure("states: selection, panel open", func(i): _m.state.select_node(nodes[i % nodes.size()], "canvas"))
+	print("state-machine model builds: %d" % sm.builds)
+	_m.state.select_node(target, "canvas")
+	await _wait(3)
+	var build_ms: Array = []
+	for i in 20:
+		var t0 := Time.get_ticks_usec()
+		sm.refresh_now()
+		build_ms.append((Time.get_ticks_usec() - t0) / 1000.0)
+		await process_frame
+	_row_of("states: one build of the graph", build_ms)
+	var ids := ["hover", "active", "focus", "checked", "disabled", "normal"]
+	await _measure("states: force a node (one per frame)", func(i): sm.select_node(ids[i % ids.size()]))
+	sm.clear()
+	await _wait(2)
+	var edges := ["normal>hover", "hover>normal"]
+	await _measure("states: play an edge (one per frame)", func(i): sm.select_edge(edges[i % edges.size()]))
+	_m.timeline.stop()
+	sm.clear()
+	await _wait(2)
+	var r := sm.node_rect("focus")
+	var a := sm.to_global(r.get_center())
+	await _measure("states: hover over the graph", func(i): _move(a + Vector2(float(i % 30) * 3.0, 0)))
+	_move(Vector2(-100, -100))
+	await _wait(2)
+	var builds0 := sm.builds
+	sm.set_open(false)
+	await _wait(3)
+	await _measure("states: selection, panel closed", func(i): _m.state.select_node(nodes[i % nodes.size()], "canvas"))
+	print("model builds while closed: %d" % (sm.builds - builds0))
 
 
 ## The time of the slowest of the next `n` frames in ms.

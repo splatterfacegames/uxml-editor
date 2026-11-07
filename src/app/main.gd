@@ -63,6 +63,7 @@ var source: EdSourceView
 var inspector: EdInspectorView
 var palette: EdPaletteView
 var timeline: EdTimelineView
+var states: EdStateMachineView
 var settings: EdSettings
 var drag: EdDragController
 var layout: EdLayoutController
@@ -162,6 +163,12 @@ func _ready() -> void:
 	timeline.seeked.connect(canvas.queue_redraw)
 	timeline.settled.connect(inspector.refresh)
 	timeline.flush_render = flush_waiting_render
+	states = EdStateMachineView.new()
+	states.name = "States"
+	add_child(states)
+	states.attach(shell, state, canvas.host, inspector, timeline, settings)
+	inspector.states_changed.connect(func(_id, _s): states.states_changed())
+	timeline.seeked.connect(states._redraw)
 	inspector.states_toggled.connect(timeline.states_toggled)
 	inspector.classes_toggled.connect(timeline.classes_toggled)
 	layout = EdLayoutController.new(state, canvas)
@@ -261,6 +268,7 @@ func save_splits() -> void:
 			changed = true
 	if changed:
 		settings.save()
+	states.save_width()
 
 
 ## Disable the native core of godot-uxml (the path of the web export and
@@ -361,7 +369,7 @@ func _screenshot(path: String) -> void:
 # ---------------------------------------------------------------------------
 
 func _on_button(element_name: String) -> void:
-	if timeline.on_button(element_name):
+	if timeline.on_button(element_name) or states.on_button(element_name):
 		return
 	match element_name:
 		"open-button":
@@ -688,7 +696,7 @@ func _on_items_chosen(list_name: String, indices: Array) -> void:
 
 
 func _on_shell_value(element_name: String, value: Variant) -> void:
-	if timeline.on_value(element_name, value):
+	if timeline.on_value(element_name, value) or states.on_value(element_name, value):
 		return
 	match element_name:
 		"palette-search":
@@ -710,6 +718,7 @@ func _on_grid(index: int, text: String) -> void:
 func set_preview(on: bool) -> void:
 	if canvas.preview == on:
 		return
+	states.clear()
 	timeline.stop()
 	canvas.set_preview(on)
 	var t := shell.get_element_model("preview-toggle")
@@ -881,6 +890,7 @@ func _on_project_opened() -> void:
 
 
 func _on_document_opened(path: String) -> void:
+	states.reset()
 	timeline.reset()
 	_update_canvas_header()
 	_refresh_tabs()
@@ -974,6 +984,7 @@ func _on_rendered() -> void:
 	_refresh_diagnostics()
 	timeline.rendered()
 	_on_selection_changed("render")
+	states.rendered()
 
 
 func _on_buffers_changed(paths: Array, _cause: String, tx: EdTransaction) -> void:
@@ -1150,6 +1161,7 @@ func _on_selection_changed(origin: String) -> void:
 		_tree_selected = nodes.map(func(x): return x.id)
 	if origin != "source":
 		_mark_selection_in_source(origin != "render")
+	states.show_selection(n)
 	inspector.show_selection(state.session, n, canvas.host, nodes.size())
 	timeline.show_selection(n)
 

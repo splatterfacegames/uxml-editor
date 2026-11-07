@@ -91,6 +91,27 @@ func test_range_end() -> void:
 	eq(EdDiagnostics.range_end(ws, "a.uss", 5), 11, "a token")
 
 
+func test_diagnostics_use_the_severity_and_the_range_of_godot_uxml() -> void:
+	var m := await editor("menu")
+	var d := {"kind": "made-up-kind", "severity": "info", "message": "m", "file": _dir + "/" + MENU, "line": 1, "column": 1, "offset": 3, "end_offset": 9}
+	var entries := EdDiagnostics.collect(m.state, {MENU: [d]}, _dir)
+	var e: Dictionary = entries.filter(func(x): return x["kind"] == "made-up-kind")[0]
+	eq(e["severity"], "info", "the severity of the diagnostic")
+	eq(e["end"], 9, "its end offset")
+	# Every diagnostic of a render has one (R11), and the panel shows it.
+	var at := m.state.workspace.text(MENU_USS).length()
+	m.state.execute(EdTransaction.make("test", "Bad", MENU_USS, [{"start": at, "end": at, "replacement": ".menu-button { no-such-property: 1px; }\n"}]), "test")
+	await frames()
+	var from: Array = m.diagnostics_all.filter(func(x): return x["source"] == "godot-uxml")
+	ok(not from.is_empty(), "the render reports the property")
+	for x in from:
+		eq(x["severity"], UxmlDiagnostic.severity_of(x["kind"]), x["kind"])
+	m._set_diag_filter("severity", "warning", "diag-severity-menu", "Warnings")
+	ok(m._diagnostics.any(func(x): return x["kind"] == "unsupported-property"), "the filter finds it")
+	m._set_diag_filter("severity", "error", "diag-severity-menu", "Errors")
+	ok(not m._diagnostics.any(func(x): return x["kind"] == "unsupported-property"), "not an error")
+
+
 # ---------------------------------------------------------------------------
 # Tabs and the one history
 # ---------------------------------------------------------------------------
@@ -233,4 +254,13 @@ func test_the_hierarchy_context_menu_runs_edit_commands() -> void:
 	menu.chosen.emit(dup)
 	await frames()
 	ok(m.state.workspace.text(MENU).contains("quit-button-copy"), "Duplicate from the menu")
+	# No menu in preview: the document gets the mouse.
+	m.shell.close_context_menu()
+	m.set_preview(true)
+	await frames()
+	var row := m.shell.get_element("hierarchy-tree").get_global_rect().get_center()
+	mouse_button(m, row, true, MOUSE_BUTTON_RIGHT)
+	mouse_button(m, row, false, MOUSE_BUTTON_RIGHT)
+	await frames()
+	eq(m.shell.get_context_menu(), null, "no menu in preview")
 	eq(m.state.workspace.history.undo_depth(), 1, "one undo step")
