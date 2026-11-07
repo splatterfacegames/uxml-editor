@@ -38,6 +38,11 @@ func undo_label() -> String:
 	return "" if _undo.is_empty() else _undo[-1]["forward"][-1].label
 
 
+## The coalesce key of the newest undo step ("" when it has none).
+func undo_key() -> String:
+	return "" if _undo.is_empty() else String(_undo[-1]["key"])
+
+
 func redo_label() -> String:
 	return "" if _redo.is_empty() else _redo[-1]["forward"][-1].label
 
