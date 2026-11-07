@@ -35,11 +35,12 @@ func test_pane_sizes_are_kept_per_user() -> void:
 	var m := await editor()
 	eq(m.shell.get_split_dimension("right-split"), 440.0, "a wide inspector by default")
 	ok(m.shell.get_native("inspector-host") == null or m.inspector.size.x >= 400.0, "the inspector has the width: %f" % m.inspector.size.x)
-	# Each pane: set, release the mouse (the end of a split line drag), read.
+	# Each pane: set, then the end of a split line drag (godot-uxml
+	# split_changed), read.
 	var sizes := {"main-split": 300.0, "left-split": 120.0, "hier-split": 260.0, "right-split": 500.0, "center-split": 380.0, "lower-split": 170.0, "source-split": 400.0}
 	for sp in sizes:
 		m.shell.set_split_dimension(sp, sizes[sp])
-	mouse_button(m, Vector2(800, 12), false)
+	m.shell.split_changed.emit("main-split", 300.0)
 	await frames()
 	var f := EdSettings.new(path)
 	for sp in sizes:
@@ -71,6 +72,11 @@ func test_a_drag_of_a_split_line_is_kept() -> void:
 	var after: float = m.shell.get_split_dimension("right-split")
 	ok(absf(after - before - 60.0) < 8.0, "the line moved: %f -> %f" % [before, after])
 	eq(EdSettings.new(path).get_value("layout", "right-split"), snappedf(after, 1.0), "the drag is saved")
+	# A release of the mouse without a drag of a line writes nothing.
+	m.shell.set_split_dimension("right-split", after + 30.0)
+	mouse_button(m, Vector2(800, 12), false)
+	await frames()
+	eq(EdSettings.new(path).get_value("layout", "right-split"), snappedf(after, 1.0), "only split_changed saves")
 	EdSettings.default_path = saved
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
@@ -411,3 +417,36 @@ func test_a_new_rule_of_a_state_is_one_rule_for_a_whole_drag() -> void:
 	var uss := m.state.workspace.text(MENU_USS)
 	eq(uss.count(":hover"), 1, "one rule over all steps: " + uss)
 	eq(m.state.workspace.history.undo_depth(), 1, "one undo step")
+
+
+func test_a_selection_outside_the_hierarchy_view_scrolls_once() -> void:
+	var dir := copy_fixture("menu")
+	var u := PackedStringArray(["<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">"])
+	for i in 80:
+		u.append("  <ui:Label name=\"l%d\" text=\"%d\" />" % [i, i])
+	u.append("</ui:UXML>")
+	var f := FileAccess.open(dir + "/Assets/UI/Long.uxml", FileAccess.WRITE)
+	f.store_string("\n".join(u) + "\n")
+	f.close()
+	tree.root.size = Vector2i(1600, 1000)
+	var m: EdMain = load("res://src/app/main.tscn").instantiate()
+	add_node(m)
+	await frames()
+	m.state.open_project(dir)
+	m.state.open_document("Assets/UI/Long.uxml")
+	await frames(8)
+	# A run of selections, one per frame: one scroll at the end of the run.
+	for i in [70, 75, 79]:
+		m.state.select_node(node_named(m, "l%d" % i), "canvas")
+		await tree.process_frame
+		eq(m._scroll_row >= 0, true, "l%d: the scroll waits" % i)
+	await frames(4)
+	var row := tree_index(m, "hierarchy-tree", node_named(m, "l79").id)
+	ok(m._row_in_view("hierarchy-tree", row), "the last selection is in view: row %d, %s in %s" % [row, m.shell.get_item_rect("hierarchy-tree", row), m.shell.get_element("hierarchy-tree").get_global_rect()])
+	eq(m._scroll_row, -1, "scrolled")
+	# A selection inside the view does not scroll.
+	var layouts: int = m.shell.layout_count
+	m.state.select_node(node_named(m, "l78"), "canvas")
+	eq(m._scroll_row, -1, "a row in view: no scroll")
+	await frames()
+	eq(m.shell.layout_count, layouts, "and no layout")

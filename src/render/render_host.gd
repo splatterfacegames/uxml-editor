@@ -367,6 +367,21 @@ func explain(id: int, property: String, states: Dictionary = {}) -> Array:
 	return out
 
 
+## The transitions of editor node `id` that a change from `from_states` to
+## `to_states` starts (godot-uxml preview_transitions, request R26): the
+## entries of the element itself, without the change and without the
+## history of earlier runs. [] when the element is not rendered.
+func preview_transitions(id: int, from_states: Array, to_states: Array) -> Array:
+	var el = element_for_node.get(id)
+	if el == null or doc == null:
+		return []
+	var out: Array = []
+	for e in doc.preview_transitions(el, PackedStringArray(from_states), PackedStringArray(to_states)):
+		if e.get("element") == el:
+			out.append(e)
+	return out
+
+
 ## A godot-uxml cascade origin in editor terms: a rule of a project
 ## stylesheet becomes {kind: "rule", path: <workspace path>, item,
 ## decl_index, states}; a rule of a godot-uxml theme becomes {kind:

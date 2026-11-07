@@ -1,0 +1,66 @@
+name: CI
+
+# The headless suite of the Godot editor (milestone 8): the GDScript path of
+# godot-uxml on Linux, both paths on Windows (the native core is a Windows
+# DLL). godot-uxml is a byte-exact copy in addons/godot_uxml at the commit of
+# godot-uxml.pin (ADR 0007): the checkout has every file, and the first step
+# checks the copy against the hash in the pin.
+
+on:
+  push:
+    branches: [godot]
+  pull_request:
+    branches: [godot]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.7.1
+
+jobs:
+  linux:
+    name: Linux (GDScript path)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the godot-uxml copy against the pin
+        run: python3 tools/update_godot_uxml.py --verify
+      - name: Download Godot
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          chmod +x godot
+          ./godot --version
+      - name: Import
+        # The first import after a checkout can crash (exit 139, also on
+        # godot-uxml); a second import passes.
+        run: ./godot --headless --path . --import || ./godot --headless --path . --import
+      - name: Tests (GDScript path)
+        run: ./godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
+
+  windows:
+    name: Windows (native and GDScript paths)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the godot-uxml copy against the pin
+        run: python tools/update_godot_uxml.py --verify
+      - name: Download Godot
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+          unzip -q godot.zip
+          # The console wrapper starts the exe of the same name without
+          # "_console": keep both names.
+          echo "GODOT=./Godot_v${GODOT_VERSION}-stable_win64_console.exe" >> "$GITHUB_ENV"
+          "./Godot_v${GODOT_VERSION}-stable_win64_console.exe" --version
+      - name: Import
+        run: $GODOT --headless --path . --import || $GODOT --headless --path . --import
+      - name: Tests (native core)
+        run: $GODOT --headless --path . -s res://tests/run_tests.gd
+      - name: Tests (GDScript path)
+        run: $GODOT --headless --path . -s res://tests/run_tests.gd -- --gdscript

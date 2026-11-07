@@ -33,6 +33,8 @@ extends RefCounted
 ##                   rules in the declaration list
 ##   states-edge     the state-machine panel: normal to hover plays on the
 ##                   timeline, paused in the middle
+##   commands        the command palette, filtered by "dup"
+##   shortcuts       the shortcut map
 ## The stages tabs, recovery, conflict and the timeline stages work on a
 ## copy of the menu fixture in user://demo-* (they write files).
 
@@ -229,6 +231,19 @@ static func stage(m: EdMain, demo: String) -> void:
 			m.states.select_edge("normal>hover")
 			m.timeline.seek_to(0.6)
 			await _frames(tree, 3)
+		"commands":
+			_select(m, "quit-button")
+			await _frames(tree, 3)
+			m.execute("palette")
+			await _frames(tree, 3)
+			m.command_palette.set_query("dup")
+			var le := EdUi.line_edit(m.command_palette.doc, "cp-search")
+			le.text = "dup"
+			le.caret_column = 3
+		"shortcuts":
+			m.execute("shortcuts")
+			await _frames(tree, 3)
+			m.command_palette.move(3)
 		"narrow":
 			m.shell.set_split_dimension("right-split", 300.0)
 			var long_rule := ".menu-button, .menu-button.primary, .menu-root > .menu-button {\n  max-width: 400px;\n}\n"

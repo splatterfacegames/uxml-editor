@@ -28,19 +28,23 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R14 | P3 | done in `6137987` | Rectangle of an element in another element's space |
 | R15 | P2 | text and `display` parts done in `dc2c081`; build cost open | Build cost of a document; text updates without a layout |
 | R16 | P3 | done in `dc2c081` | Context menu at a point, in the look of the owner document |
-| R17 | P3 | open (workaround) | Value updates of field controls without a restyle |
-| R18 | P3 | open (workaround) | Elide the placeholder of a text field |
-| R19 | P3 | open (workaround) | Runtime classes of an element; finish all transitions |
-| R20 | P3 | open (workaround) | Public easing, shorthand and elision helpers |
-| R21 | P3 | open (workaround) | A signal when a split view changes size |
-| R22 | P3 | open (workaround) | Text changes that are stable inside a ScrollView, and a unitless `flex-basis: 0` |
-| R23 | P3 | open (workaround) | A completed transition after an instant change stops a later run |
-| R24 | P3 | open (workaround) | The selected row of a list without focus in the editor skins |
-| R25 | P2 | open (workaround) | A stylesheet reload that restyles only what the edit can change |
-| R26 | P3 | open (workaround) | The transitions of a state change, without the change |
+| R17 | P3 | text values done in `1167eb1`; Toggle open | Value updates of field controls without a restyle |
+| R18 | P3 | done in `1167eb1`; not used yet (R28) | Elide the placeholder of a text field |
+| R19 | P3 | done in `1167eb1` | Runtime classes of an element; finish all transitions |
+| R20 | P3 | done in `1167eb1` | Public easing, shorthand and elision helpers |
+| R21 | P3 | done in `1167eb1` | A signal when a split view changes size |
+| R22 | P3 | done in `1167eb1` | Text changes that are stable inside a ScrollView, and a unitless `flex-basis: 0` |
+| R23 | P3 | not changed (Unity does the same); `clear_completed_transitions` in `1167eb1` | A completed transition after an instant change stops a later run |
+| R24 | P3 | done in `1167eb1` | The selected row of a list without focus in the editor skins |
+| R25 | P2 | done in `1167eb1` | A stylesheet reload that restyles only what the edit can change |
+| R26 | P3 | done in `1167eb1` | The transitions of a state change, without the change |
+| R27 | P2 | open (workaround) | A TextField that is not `is-delayed` loses its caret at each change |
+| R28 | P3 | open (workaround) | A placeholder update without a restyle |
+| R29 | P2 | open (workaround) | A scroll of a collection view lays out the whole document |
 
-The editor pins godot-uxml `dc2c081` (github.com/splatterfacegames/godot-uxml),
-which has R1-R14, R16, R11 and the text and `display` parts of R15. The
+The editor pins godot-uxml `1167eb1` (github.com/splatterfacegames/godot-uxml),
+which has R1-R14, R16, R18-R22, R24-R26, the text and `display` parts of R15,
+the text part of R17, and `clear_completed_transitions` for R23. The
 sections of the done requests give the final API and where the editor uses
 it. The open requests keep their workaround notes.
 
@@ -306,174 +310,184 @@ is gone.
 item, and at the corner of the window: the editor skin, the checkmark column,
 separators, the hover colour, and the menu stays inside the window. No defect.
 
-## R17. Value updates of field controls without a restyle (P3)
+## R17. Value updates of field controls without a restyle (P3, partly done)
+
+Done in `1167eb1`:
 
 ```gdscript
 # UxmlDocument
-## Set the value of a field (TextField, Toggle, DropdownField, ColorField,
-## ...) as the user would, without a change notification and without a
-## restyle when the size of the control does not change.
-func set_field_value(element_name: String, value: Variant, notify: bool = false) -> void
+func set_field_value(element_name: String, value: Variant, notify: bool = false) -> bool
+func get_field_value(element_name: String) -> Variant
 ```
 
-**Use case.** The inspector shows the value of every row for each
-selection. A model `value` change restyles the field (about 4 ms native,
-70 ms GDScript, see R15), so the typed helpers of the inspector are
-buttons with menus, not DropdownFields with the current value, and the
-colour swatch is a tinted button.
+A text value runs no restyle. **Editor use.** The inspector, the From and To
+fields of the timeline, and the Preview, States, Snap and state-preview
+toggles write through `set_field_value`. The direct writes to the `LineEdit`
+controls and the silent model writes of the values are gone.
 
-**Workaround.** Text values go to the `LineEdit` controls (`EdUi`);
-Toggle values (the state preview) go through the model; the colour
-swatch is the `self_modulate` of a Button control. A Toggle value costs one
-layout of the inspector: a node of the state-machine panel costs 13 ms native
-and 60 ms GDScript on the menu fixture.
+**Open: a Toggle value still restyles** through `:checked`. A node of the
+state-machine panel costs one layout of the inspector: 15.3 ms native and 68
+ms GDScript on the menu fixture (`1167eb1`).
 
-## R18. Elide the placeholder of a text field (P3)
+**Cost.** In a scratch document with 70 fields, 70 `set_field_value` calls
+cost about 11 ms (native and GDScript) against about 1.6 ms for direct
+`LineEdit` writes. Selection on the menu fixture went from 9.8 to 10.4 ms
+(native) and from 16.7 to 18.3 ms (GDScript). Not a request yet.
 
-`text-overflow: ellipsis` elides a Label or a Button. The placeholder of a
-TextField is cut off at the edge of the `LineEdit`.
+## R18. Elide the placeholder of a text field (P3, done; not used yet)
 
-Request: elide the placeholder of a field with `text-overflow: ellipsis`,
-and show the whole text as the tooltip.
+Done in `1167eb1`: `text-overflow: ellipsis` on a single-line field elides its
+placeholder, with the whole text as the tooltip.
 
-**Use case.** The inspector shows the computed value and its origin as the
-placeholder: `180px   ← Menu.uss`.
+**Editor use: none yet.** godot-uxml elides a placeholder that changes through
+the model (`placeholder-text`), and a model change restyles the field. The
+inspector changes about 70 placeholders per selection: 8 ms through the model
+against 1.6 ms through the `LineEdit`. Request R28 asks for a placeholder
+update without a restyle. Until then `EdUi.elided_placeholder()` shortens the
+text, and the inspector sets it on the `LineEdit`.
 
-**Workaround.** `EdUi.elided_placeholder()` shortens the text with
-`UxmlStyleApplier.elide_text`. The inspector does this at each value change
-and when the fields change width.
+## R19. Runtime classes of an element; finish all transitions (P3, done)
 
-## R19. Runtime classes of an element; finish all transitions (P3)
+Done in `1167eb1`:
 
 ```gdscript
 # UxmlDocument
-## The author classes of `element` at runtime; the classes that the control
-## adds stay.
 func set_author_classes(element: UxmlElement, classes: PackedStringArray) -> void
-## End every running transition at its end value, now.
+func get_author_classes(element: UxmlElement) -> PackedStringArray
 func finish_transitions() -> void
 ```
 
-**Use case.** A timeline run shows a From state and a To state of an
-element, with no source edit, and needs a start state without transitions.
+**Editor use.** `EdTransitionPlayer._apply` calls `set_author_classes`;
+`_settle` calls `finish_transitions` (no end events, the clock stays). The
+`merged_class` write and `advance_transitions(1.0e5)` are gone.
 
-**Workaround.** `EdTransitionPlayer._apply` sets the `class` attribute of
-the model to `UxmlParts.merged_class(el, author)`. `_settle` calls
-`advance_transitions(1.0e5)`, which also emits end events and moves the
-clock.
+## R20. Public easing, shorthand and elision helpers (P3, done)
 
-## R20. Public easing, shorthand and elision helpers (P3)
+Done in `1167eb1`: godot-uxml documents `UssTransitions.easing`,
+`UssProperties.EASING_MODES`, `UssTransitions.SHORTHANDS`,
+`UxmlStyleApplier.elide_text` and `UxmlParts.merged_class` as API ("Public
+helpers" in its design document), and `test_public_helpers` keeps them.
 
-The editor calls these static members of godot-uxml. The design document
-does not list them as API, so a change in godot-uxml can break the editor:
+**Editor use.** `EdEasingCurve`, `EdEasingPicker`, `EdStateMachine` (through
+the caller), the timeline and `EdUi.elided_placeholder` call these members.
+The editor has no copies of them. `merged_class` is no longer used (R19).
 
-| Member | Editor use |
-| --- | --- |
-| `UssTransitions.easing(mode, t)` | `EdEasingCurve` |
-| `UssProperties.EASING_MODES` | the easing picker |
-| `UssTransitions.SHORTHANDS` | the entry of a track in a `transition-property` list |
-| `UxmlStyleApplier.elide_text()` | `EdUi` (R15, R18) |
-| `UxmlParts.merged_class()` | `EdTransitionPlayer` (R19) |
+## R21. A signal when a split view changes size (P3, done)
 
-Request: document these members as API, or give public equivalents.
+Done in `1167eb1`: `signal split_changed(view_name, dimension)` at the end of
+a drag.
 
-## R21. A signal when a split view changes size (P3)
+**Editor use.** `EdMain` saves the pane sizes on `split_changed` and at
+close. The save after each release of the left mouse button is gone.
 
-```gdscript
-# UxmlDocument
-signal split_changed(view_name: String, dimension: float)  # at the end of a drag
-```
+## R22. Text changes that are stable inside a ScrollView; a unitless `0` (P3, done)
 
-**Use case.** The editor keeps the pane sizes per user.
+Done in `1167eb1`: a Label stretched across the viewport of a vertical
+ScrollView changes its text without a layout; `flex-basis: 0` is a px length.
 
-**Workaround.** `EdMain.save_splits()` reads `get_split_dimension()` of the
-seven views after each release of the left mouse button, and at close.
+**Editor use.** The `.line` row around each text line of the inspector is
+gone: the labels are children of the sections. The sheets of the editor write
+`flex-basis: 0`. The inspector still lays out nothing per selection
+(`bench/frame_cost.gd`, column `lay.insp`).
 
-## R22. Text changes that are stable inside a ScrollView; a unitless `flex-basis: 0` (P3)
+## R23. A completed transition after an instant change stops a later run (P3, done)
 
-`_text_stable` treats two cases as "the text can move an element", so a
-`set_text()` lays out the whole document (on the inspector: 4.4 ms native,
-30 ms GDScript per selection):
+Not changed in godot-uxml: Unity's source behaves the same way (godot-uxml
+design document, "A completed transition after an instant change"). New in
+`1167eb1`: `clear_completed_transitions()`.
 
-1. A Label that stretches across a column inside a ScrollView. The content
-   container of a ScrollView is not definite on its cross axis, also without a
-   horizontal scroller.
-2. `flex-basis: 0`. `_is_px()` needs the unit; only `0px` counts.
+**Editor use.** `EdTransitionPlayer.arm()` calls it before the change of each
+run, so a run starts as if it were the first. The edge-kind test of the
+state-machine panel checks every edge again, `checked>normal` included, and
+`test_the_same_edge_twice_runs_twice` runs the sequence twice.
 
-Request: a ScrollView without horizontal scrolling has a definite content
-width; `0` counts as a length.
+## R24. The selected row of a list without focus in the editor skins (P3, done)
 
-**Workaround.** Each text line of the inspector is a Label with `flex-basis:
-0px` in a row (`.line` in `inspector.uss`). The sheets of the editor write
-`0px`.
+Done in `1167eb1`: the dark editor skin has `rgb(77, 77, 77)`. The
+`.panel-list` rule of `editor_shell.uss` is gone.
 
-## R23. A completed transition after an instant change stops a later run (P3)
+## R25. A stylesheet reload that restyles only what the edit can change (P2, done)
 
-`UssTransitions._start` keeps a completed transition per element and property.
-A later change with `combined <= 0` returns before it removes the entry, so a
-later change to the same end value starts nothing:
+Done in `1167eb1`: `reload_stylesheet(origin, text)` restyles only the
+elements of the changed rules when only declarations change, and
+`get_last_reload_mode()` tells `"restyle"`, `"cascade"` or `"full"`. A
+`transition-*`-only change applies nothing and lays out nothing.
 
-```
-.a { min-width: 100px; transition: min-width 1s; }
-.a:checked { min-width: 300px; transition-duration: 0s; }
-hover -> normal (completes to 100px), normal -> checked (instant),
-checked -> normal: no transition starts (the entry still says 100px).
-```
+**Editor use.** No code change for the reload itself. The render after a
+timeline bar edit on the 507-element document (`bench/frame_cost.gd`):
 
-**Use case.** A run of the timeline after other runs of the same element shows
-no track. CSS removes a completed transition when the after-change style
-differs from its end value.
-
-**Workaround.** None. Another selection or a render starts clean; the edge of
-the state-machine panel keeps its kind, and the timeline says that no
-transition runs.
-
-## R24. The selected row of a list without focus in the editor skins (P3)
-
-`.unity-collection-view__item--selected` is `rgb(174, 174, 174)` in
-`unity-default-containers.uss`, and the editor skins do not override it. With
-the light text of the dark skin, the row is hard to read. The Unity dark skin
-uses `rgb(77, 77, 77)`.
-
-**Workaround.** A rule in `editor_shell.uss` for `.panel-list`.
-
-## R25. A stylesheet reload that restyles only what the edit can change (P2)
-
-`reload_stylesheet()` rebuilds the cascade and applies every control again. On
-the 507-element document:
-
-| Step of the render after one `transition-delay` edit | Native | GDScript |
+| | native | GDScript |
 | --- | --- | --- |
-| `reload_stylesheet` and the element map | 157 ms | not measured |
-| the restyle that the next `get_transitions` runs, and the arm of the run | 128 ms | not measured |
-| the whole frame | 312-420 ms | 1090-1110 ms |
+| `dc2c081` | 317 ms | 1079 ms |
+| `1167eb1` | 61 ms | 473 ms |
 
-The same edit on the menu fixture: 14-21 ms native, 18-26 ms GDScript.
+The target is 100 ms (native), so the pause of 0.4 s before the render
+(`EdMain.RELOAD_PAUSE`) is gone: the release of a bar drag writes and
+renders in the same frame. The preview of the drag (`set_preview`) stays for
+the frames of the drag.
 
-Request: when only declarations change and the selectors stay, keep the rule
-matches and restyle only the elements of those rules. A change of only
-`transition-*` declarations needs no apply and no layout.
+## R26. The transitions of a state change, without the change (P3, done)
 
-**Workaround.** A timeline bar drag writes once, at its end, and the render
-waits for a pause of 0.4 s (`EdMain.RELOAD_PAUSE`). The canvas shows the new
-values through the model until then (`EdTransitionPlayer.set_preview`). The
-frame of the render itself still costs what this table says.
-
-## R26. The transitions of a state change, without the change (P3)
+Done in `1167eb1`:
 
 ```gdscript
 # UxmlDocument
-## What get_transitions() would list after a change of `element` from
-## `from_states` to `to_states`, without the change.
 func preview_transitions(element: UxmlElement, from_states: PackedStringArray, to_states: PackedStringArray) -> Array
 ```
 
-**Use case.** The state-machine panel draws an edge with a transition
-differently from an instant change.
+**Editor use.** `EdRenderHost.preview_transitions()` keeps the entries of the
+element itself; `EdStateMachine` takes the timing of each edge from it. The
+derivation from the declarations and the computed values is gone. A property
+that only the theme changes through `transition-property: all` now counts
+(`test_a_theme_property_through_all_is_a_transition`). One build of the graph
+costs more: 3.0 -> 3.8 ms (menu, native) and 3.0 -> 10.6 ms (large, native);
+a build waits for a frame without a change.
 
-**Workaround.** `EdStateMachine` compares the computed values of the two states
-(`explain_style`), reads the `transition-*` values of the state that the change
-goes to, and treats `auto`, `none` and an unset value as instant, as
-`UssTransitions._start` does. Limits: a property that only the theme changes
-counts only when `transition-property` names it, not through `all`. A test
-compares the kinds with real runs.
+## R27. A TextField that is not `is-delayed` loses its caret at each change (P2)
+
+Each character typed into a TextField without `is-delayed` puts the caret at
+position 0 after the restyle of the change, so "dupl" shows as "lpud". Seen
+in a plain document with one `<ui:TextField>` at `dc2c081` and `1167eb1`, and
+in the library search of the editor (a `ToolbarSearchField`). A field with
+`is-delayed="true"` keeps its caret.
+
+Request: keep the caret column of the `LineEdit` when the restyle of a value
+change writes the same text.
+
+**Workaround.** `EdUi.live_text()` reads the caret at `gui_input` (before the
+`LineEdit` handles the key), and puts it back after the change and at the next
+frame. The command palette search is `is-delayed`, and both searches read the
+text through `LineEdit.text_changed`. Test:
+`test_typing_in_the_library_search_keeps_the_order`.
+
+## R28. A placeholder update without a restyle (P3)
+
+```gdscript
+# UxmlDocument
+## Set the placeholder of a text field; no restyle when the size of the
+## field does not change. R18 elides the new text.
+func set_field_placeholder(element_name: String, text: String) -> bool
+```
+
+**Use case.** The inspector shows the computed value and its origin as the
+placeholder of about 70 fields per selection (R18).
+
+**Workaround.** `EdUi.elided_placeholder()` and a direct write to
+`LineEdit.placeholder_text`, with the model attribute set without a change
+notification (`EdUi.set_silent`).
+
+## R29. A scroll of a collection view lays out the whole document (P2)
+
+`scroll_to_item()` on a TreeView binds the visible rows again, and the next
+restyle lays out the whole window document. On the 507-element document a
+selection that scrolls the hierarchy costs about 32 ms native and 98 ms
+GDScript, against 15 ms and 17 ms for a selection without the scroll
+(scratch measure, two frames per selection). This was the unexplained window
+layout of selection in milestone 7 (37 layouts per 60 selections).
+
+Request: a scroll and a row rebind of a collection view with a fixed item
+height lay out only the rows (the viewport has a fixed size).
+
+**Workaround.** `EdMain._select_in_tree` scrolls only for a row outside the
+view, and only after a frame without another selection, so a run of
+selections scrolls once (`test_a_selection_outside_the_hierarchy_view_scrolls_once`).

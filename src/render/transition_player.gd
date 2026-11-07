@@ -13,9 +13,8 @@ extends RefCounted
 ## plays).
 ##
 ## A state change is a runtime change of the render, not of the source:
-## the classes go to the `class` attribute of the godot-uxml element (with
-## the classes that the control adds) and the states to
-## set_forced_states. disarm() puts back the classes of the source text
+## the classes go to set_author_classes (the classes that the control adds
+## stay) and the states to set_forced_states. disarm() puts back the classes of the source text
 ## and the forced states of the state preview, without transitions, and
 ## gives the frame clock back to godot-uxml.
 ##
@@ -72,6 +71,9 @@ func arm(id: int, from: Dictionary, to: Dictionary) -> Array:
 	_apply(el, from)
 	_show_preview(el)
 	_settle(doc)
+	# A run as if it were the first: a transition that completed in an
+	# earlier run does not stop this one (Unity keeps it, request R23).
+	doc.clear_completed_transitions()
 	_apply(el, to)
 	return doc.get_transitions()
 
@@ -164,19 +166,13 @@ func rendered() -> void:
 
 
 func _apply(el: UxmlElement, st: Dictionary) -> void:
-	var author := " ".join(PackedStringArray(st.get("classes", [])))
-	var want := UxmlParts.merged_class(el, author)
-	var cur = el.get_attribute("class")
-	if want.is_empty() and cur != null:
-		el.remove_attribute("class")
-	elif not want.is_empty() and String(cur if cur != null else "") != want:
-		el.set_attribute("class", want)
+	var author := PackedStringArray(st.get("classes", []))
+	if host.doc.get_author_classes(el) != author:
+		host.doc.set_author_classes(el, author)
 	host.doc.set_forced_states(el, PackedStringArray(st.get("states", [])))
 
 
-## Finish every transition at once: the restyle of the change runs
-## first (get_transitions), then playback passes every end.
+## Finish every transition at once (the restyle of the change runs first),
+## with no event and no move of the clock.
 static func _settle(doc: UxmlDocument) -> void:
-	doc.get_transitions()
-	if doc.has_running_transitions():
-		doc.advance_transitions(1.0e5)
+	doc.finish_transitions()

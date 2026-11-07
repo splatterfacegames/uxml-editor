@@ -1,7 +1,7 @@
 # Godot
 .godot/
 *.translation
-export_presets.cfg
+# export_presets.cfg is committed (milestone 8): it has no secrets.
 /build/
 
 # Python

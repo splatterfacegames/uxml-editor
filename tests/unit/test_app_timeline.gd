@@ -603,12 +603,8 @@ func test_a_bar_drag_writes_once_and_previews_on_the_run() -> void:
 	await frames(2)
 	ok(m.state.workspace.text(MENU_USS).contains("transition-delay: 0s, 0.5s;"), m.state.workspace.text(MENU_USS))
 	eq(m.state.workspace.history.undo_depth(), 1, "one write, one undo step")
-	eq(m.canvas.host.renders + m.canvas.host.patches, renders, "the stylesheet reload waits for a pause")
-	ok(not m.reload_timer.is_stopped(), "the timer runs")
-	eq(tl.model.tracks[_track(m, "min-width")]["delay"], 0.5, "the run keeps the value")
-	# The pause: the render agrees with the source, and the preview is gone.
-	m.flush_waiting_render()
-	await frames(2)
+	# The release renders (the partial reload of godot-uxml R25 needs no
+	# pause): the render agrees with the source, and the preview is gone.
 	eq(m.canvas.host.renders + m.canvas.host.patches, renders + 1, "one reload")
 	el = m.canvas.host.element_for_node[n.id]
 	var style = el.get_attribute("style")
@@ -622,7 +618,7 @@ func test_a_bar_drag_writes_once_and_previews_on_the_run() -> void:
 	eq(tl.model.tracks[_track(m, "min-width")]["delay"], 0.2)
 
 
-func test_an_undo_in_the_pause_after_a_bar_drag() -> void:
+func test_an_undo_after_a_bar_drag() -> void:
 	var m := await _open()
 	var n := await _select(m, "quit-button")
 	await _run_hover(m, n)
@@ -633,18 +629,17 @@ func test_an_undo_in_the_pause_after_a_bar_drag() -> void:
 	var w := _track(m, "min-width")
 	var p := _bar_point(m, w)
 	await drag(m, p, p + Vector2(m.timeline._pps * 0.2, 0), 3)
-	ok(not m.reload_timer.is_stopped(), "the pause runs")
+	await frames(2)
 	m.state.undo()
 	await frames(3)
 	eq(m.state.workspace.text(MENU_USS), src)
-	ok(m.reload_timer.is_stopped(), "the undo renders: no render waits")
 	eq(m.timeline.model.tracks[_track(m, "min-width")]["delay"], 0.2, "the run shows the source")
 	var el: UxmlElement = m.canvas.host.element_for_node[n.id]
 	var style = el.get_attribute("style")
 	ok(style == null or not String(style).contains("transition-delay"), "no preview: " + str(style))
 
 
-func test_a_bar_drag_without_a_run_waits_too() -> void:
+func test_a_bar_drag_without_a_run_renders_at_the_release() -> void:
 	var m := await _open()
 	await _select(m, "quit-button")
 	await frames()
@@ -658,14 +653,15 @@ func test_a_bar_drag_without_a_run_waits_too() -> void:
 	var renders: int = m.canvas.host.renders + m.canvas.host.patches
 	await drag(m, p, p + Vector2(pps * 0.2, 0), 3)
 	ok(m.state.workspace.text(MENU_USS).contains("transition-delay: 0s, 0.4s;"), m.state.workspace.text(MENU_USS))
-	eq(m.canvas.host.renders + m.canvas.host.patches, renders, "the reload waits")
+	await frames(2)
+	eq(m.canvas.host.renders + m.canvas.host.patches, renders + 1, "one reload at the release")
 	eq(m.timeline.model.tracks[_track(m, "min-width")]["delay"], 0.4, "the bar shows the value")
-	# Undo in the pause: the render already has the text; the bar goes back.
+	# Undo: the bar goes back.
 	m.state.undo()
 	await frames(3)
 	eq(m.state.workspace.text(MENU_USS), src)
 	eq(m.timeline.model.tracks[_track(m, "min-width")]["delay"], 0.2, "the source again")
-	# A second drag reads the list of the first: press renders first.
+	# A second drag reads the list of the first.
 	p = _bar_point(m, _track(m, "min-width"))
 	await drag(m, p, p + Vector2(pps * 0.2, 0), 3)
 	var bg := _track(m, "background-color")
@@ -675,7 +671,7 @@ func test_a_bar_drag_without_a_run_waits_too() -> void:
 	eq(m.state.workspace.history.undo_depth(), 2, "one step per gesture")
 
 
-func test_a_selection_change_in_the_pause_renders_first() -> void:
+func test_a_selection_change_after_a_bar_drag() -> void:
 	var m := await _open()
 	var n := await _select(m, "quit-button")
 	await _run_hover(m, n)
@@ -687,7 +683,6 @@ func test_a_selection_change_in_the_pause_renders_first() -> void:
 	var el: UxmlElement = m.canvas.host.element_for_node[n.id]
 	await _select(m, "play-button")
 	await frames(2)
-	ok(m.reload_timer.is_stopped(), "no render waits")
 	ok(not m.timeline.player.armed, "the run ended")
 	var style = m.canvas.host.element_for_node[n.id].get_attribute("style")
 	ok(style == null or not String(style).contains("transition-delay"), "no preview stays: " + str(style))
@@ -713,7 +708,6 @@ func test_a_refused_bar_write_changes_nothing() -> void:
 	mouse_button(m, p + Vector2(m.timeline._pps * 0.2, 0), false)
 	await frames(2)
 	eq(m.state.workspace.text(MENU_USS), src, "refused")
-	ok(not m.timeline.defer_next_render, "no render waits")
 	eq(m.timeline.model.tracks[_track(m, "min-width")]["delay"], 0.2, "the run shows the source")
 	var style = m.canvas.host.element_for_node[n.id].get_attribute("style")
 	ok(style == null or not String(style).contains("transition-delay"), "no preview: " + str(style))

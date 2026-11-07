@@ -83,7 +83,7 @@
     -unity-text-align: middle-left;
     color: rgb(170, 170, 170);
     margin-left: 6px;
-    flex-basis: 0px;
+    flex-basis: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -92,18 +92,11 @@
     background-color: rgb(48, 48, 48);
 }
 
-/* The selected row of a list without focus: the value of the Unity dark skin.
-   The editor skins of godot-uxml keep the light value of the runtime theme
-   (request R24). */
-.panel-list .unity-collection-view__item--selected {
-    background-color: rgb(77, 77, 77);
-}
-
 /* A long row elides; the tooltip has the whole text. */
 .panel-list .unity-label {
     flex-grow: 1;
     flex-shrink: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -111,7 +104,7 @@
 .panel-list .unity-tree-view__item-content {
     flex-grow: 1;
     flex-shrink: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     overflow: hidden;
 }
 
@@ -138,7 +131,7 @@
 
 .status-message {
     flex-grow: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -243,7 +236,7 @@
 
 .tl-info {
     flex-grow: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     margin-left: 6px;
     -unity-text-align: middle-left;
     color: rgb(160, 160, 160);
@@ -271,7 +264,7 @@
 
 .sm-target {
     flex-grow: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     -unity-text-align: middle-left;
     color: rgb(170, 170, 170);
     overflow: hidden;
@@ -293,7 +286,7 @@
 
 .sm-info {
     flex-grow: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     padding-left: 6px;
     -unity-text-align: middle-left;
     color: rgb(180, 180, 180);

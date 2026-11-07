@@ -17,15 +17,15 @@ extends RefCounted
 ## An edge exists when its far state (the one with more pseudo-states) has
 ## rules. Its `changes` are the properties of those rules, and the properties
 ## that `transition-property` names (a theme rule can change those), with
-## another computed value in the other state. As in USS, the transition of a
-## change comes from the state that the change goes to. A value without a
-## number (`auto`, `none`, a value of the Godot theme) applies at once, as in
-## godot-uxml. Edge `kind`:
+## another computed value in the other state. Its `timing` is what godot-uxml
+## starts for the change (`preview` Callable, request R26: the real rules,
+## without the change and without the history of earlier runs, so also a
+## property that only the theme changes through `all`). Edge `kind`:
 ##
-##   "transition"  a changed property has a transition (duration + delay > 0)
+##   "transition"  the change starts a transition
 ##   "instant"     a property changes, without a transition
 ##   "none"        the rules give the values of the other state already
-##
+
 ## Model: {nodes: [node], edges: [edge]}
 ## Node: {id, label, states, rules: [rule]}
 ## Rule: {path, item, selector, line, start, end, declarations: [declaration]}
@@ -34,9 +34,11 @@ extends RefCounted
 ##        [{property, from, to}], timing: [{property, delay, duration, easing}],
 ##        kind, length}
 ##
-## No godot-uxml dependency: `explain` and the shorthand table come from the
-## caller. `explain.call(property, query)` returns the normalized candidates
-## of EdRenderHost.explain().
+## No godot-uxml dependency: `explain`, `preview` and the shorthand table come
+## from the caller. `explain.call(property, query)` returns the normalized
+## candidates of EdRenderHost.explain(); `preview.call(from_states, to_states)`
+## the entries of EdRenderHost.preview_transitions() ({property, delay,
+## duration, easing, from, to}).
 
 const NODES := [
 	{"id": "normal", "label": "normal", "states": [], "names": []},
@@ -64,7 +66,7 @@ static func query(states: Array) -> Dictionary:
 	return q
 
 
-static func build(session: EdDocumentSession, node: EdUxmlNode, explain: Callable, shorthands: Dictionary = {}) -> Dictionary:
+static func build(session: EdDocumentSession, node: EdUxmlNode, explain: Callable, shorthands: Dictionary = {}, preview: Callable = Callable()) -> Dictionary:
 	var cache := {}
 	var ask := func(prop: String, states: Array) -> Array:
 		var key := prop + "|" + ",".join(PackedStringArray(states))
@@ -83,8 +85,8 @@ static func build(session: EdDocumentSession, node: EdUxmlNode, explain: Callabl
 		var far: Dictionary = by_id[pair[1]]
 		if (far["rules"] as Array).is_empty():
 			continue
-		edges.append(_edge(near, far, far, ask, shorthands))
-		edges.append(_edge(far, near, far, ask, shorthands))
+		edges.append(_edge(near, far, far, ask, shorthands, preview))
+		edges.append(_edge(far, near, far, ask, shorthands, preview))
 	return {"nodes": nodes, "edges": edges}
 
 
@@ -180,11 +182,8 @@ static func _rule(sheet: Variant, path: String, it: Dictionary, spec: Dictionary
 		"declarations": decls}
 
 
-static func _edge(from: Dictionary, to: Dictionary, far: Dictionary, ask: Callable, shorthands: Dictionary) -> Dictionary:
+static func _edge(from: Dictionary, to: Dictionary, far: Dictionary, ask: Callable, shorthands: Dictionary, preview: Callable) -> Dictionary:
 	var names := _list("transition-property", to["states"], ask)
-	var durs := _list("transition-duration", to["states"], ask)
-	var delays := _list("transition-delay", to["states"], ask)
-	var easings := _list("transition-timing-function", to["states"], ask)
 	var props: Array = []
 	for r in far["rules"]:
 		for d in r["declarations"]:
@@ -207,24 +206,22 @@ static func _edge(from: Dictionary, to: Dictionary, far: Dictionary, ask: Callab
 				changes.append({"property": lh, "from": a, "to": b})
 	var timing: Array = []
 	var length := 0.0
-	for c in changes:
-		var k := EdTransitionValues.entry_index(names, durs, delays, c["property"], shorthands)
-		if k < 0 or not _moves(c["from"]) or not _moves(c["to"]):
-			continue
-		var dur := maxf(0.0, EdTransitionValues.parse_time(String(durs[k % durs.size()])))
-		var delay := EdTransitionValues.parse_time(String(delays[k % delays.size()]))
-		delay = 0.0 if is_nan(delay) else delay
-		timing.append({"property": c["property"], "delay": delay, "duration": dur, "easing": String(easings[k % easings.size()])})
+	var tracks: Array = preview.call(from["states"], to["states"]) if preview.is_valid() else []
+	for t in tracks:
+		var prop := String(t["property"])
+		var delay := float(t.get("delay", 0.0))
+		var dur := float(t.get("duration", 0.0))
+		timing.append({"property": prop, "delay": delay, "duration": dur, "easing": String(t.get("easing", ""))})
 		length = maxf(length, delay + dur)
+		# A property that only the theme changes is a change too.
+		if not seen.has(prop):
+			seen[prop] = true
+			changes.append({"property": prop, "from": str(t.get("from", "")), "to": str(t.get("to", ""))})
+	timing.sort_custom(func(x, y): return String(x["property"]) < String(y["property"]))
 	var kind := "transition" if not timing.is_empty() else ("instant" if not changes.is_empty() else "none")
 	return {"id": "%s>%s" % [from["id"], to["id"]], "from": from["id"], "to": to["id"], "from_label": from["label"], "to_label": to["label"],
 		"from_states": from["states"], "to_states": to["states"], "far": far["id"], "rules": far["rules"],
 		"changes": changes, "timing": timing, "kind": kind, "length": length}
-
-
-## A value that a transition can start from or go to.
-static func _moves(value: String) -> bool:
-	return not value.is_empty() and value != "auto" and value != "none"
 
 
 static func _winner(entries: Array) -> String:

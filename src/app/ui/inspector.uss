@@ -25,22 +25,9 @@
     white-space: normal;
 }
 
-/* A text line: the label in a row with flex-basis 0px has a width that does
-   not follow its text, so a new text needs no layout (godot-uxml R15). A
-   stretched label inside a ScrollView does not count as fixed (request R22). */
-.line {
-    flex-direction: row;
-    flex-shrink: 0;
-}
-
-.line > .title, .line > .subtitle, .line > .readout, .line > .link {
-    flex-grow: 1;
-    flex-shrink: 1;
-    flex-basis: 0px;
-}
-
-/* The labels that change per selection have a fixed height and fill the
-   width, so a new text needs no layout. */
+/* The labels that change per selection have a fixed height and stretch
+   across the column of the ScrollView, so a new text needs no layout
+   (godot-uxml "Text changes and the layout"). */
 .title {
     height: 24px;
     padding-left: 8px;
@@ -207,7 +194,7 @@
 .class-rules {
     flex-grow: 1;
     flex-shrink: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     margin-left: 0;
 }
 
@@ -250,7 +237,7 @@
 
 .easing-name {
     flex-grow: 1;
-    flex-basis: 0px;
+    flex-basis: 0;
     height: 18px;
     color: rgb(160, 160, 160);
     overflow: hidden;

@@ -36,6 +36,9 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                diagnostics.gd     diagnostics entries and filters    │
 │                ui_util.gd         label and model updates without a  │
 │                                   layout (EdUi)                      │
+│                command_palette.gd palette and shortcut map (UXML)    │
+│                web/web_host.gd    browser project host: File System  │
+│                web/web_host.js    Access API or zip (JavaScriptBridge)│
 │                demo.gd            staged states for screenshots      │
 │                ui/*.uxml, *.uss   the window, authored in UXML       │
 ├───────────────────────────────────────────────────────────────────────┤
@@ -75,6 +78,8 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                project_store.gd   enumerate, read, revision-checked  │
 │                                   atomic save, quick disk check      │
 │                recovery_journal   unsaved edits as a record chain    │
+│                command_registry   commands, key bindings, fuzzy      │
+│                                   search                             │
 ├───────────────────────────────────────────────────────────────────────┤
 │ addons/godot_uxml/  godot-uxml, a synced copy pinned in              │
 │                     godot-uxml.pin (native DLL + GDScript path)      │
@@ -402,11 +407,11 @@ the view draws (`set_imgui_handler`).
   writes once, at its end, so it is one undo step. During the drag, the run
   shows the value through declarations at the end of the `style` attribute of
   the godot-uxml model (`EdTransitionPlayer.set_preview`): a restyle of one
-  element instead of a stylesheet reload. After the write the preview stays,
-  and the render waits for a pause of 0.4 s (`EdMain.RELOAD_PAUSE`, request
-  R25). Any other edit, an undo, another selection, the next press in the
-  tracks and the end of the run render first. Escape ends the preview; nothing
-  was written. During a run the
+  element instead of a stylesheet reload. The release writes, and the render
+  of the write runs in the same frame: the partial stylesheet reload of
+  godot-uxml (request R25) costs 61 ms native and 473 ms GDScript on the
+  507-element document. Escape ends the preview; nothing was written. During
+  a run the
   targets come from `EdStyleTargets.run_choices()`: the targets of the To
   state, then the targets without states, the winner first. The transition
   of a change often comes from a rule without states
@@ -431,11 +436,14 @@ dragline, and no model is built.
   change.
 - **Edge kinds.** The changes of an edge are the properties of the rules of the
   far state and the names of `transition-property`, with another winning value
-  in the other state. `"transition"`: a change has an entry with duration plus
-  delay above 0 in the state that the change goes to, and both values have a
-  number. `"instant"`: a change without one. `"none"`: no change. The panel
-  draws them as a solid arrow, a dashed arrow and a faint dashed arrow (request
-  R26). A test compares the kinds with real runs.
+  in the other state. The timing of an edge is what godot-uxml starts for the
+  change: `preview_transitions()` (request R26) runs the real rules on a second
+  cascade, without the change and without the history of earlier runs, so a
+  property that only the theme changes through `all` counts too.
+  `"transition"`: the change starts a transition. `"instant"`: a change
+  without one. `"none"`: no change. The panel draws them as a solid arrow, a
+  dashed arrow and a faint dashed arrow. A test compares the kinds with real
+  runs.
 - **Forced states.** The panel owns the state of a node: `{loc, id, saved,
   states}`. `release()` sets the saved states of the state preview again. Between
   an edit and its render the id of the host is the old one; after the render the
@@ -450,8 +458,8 @@ dragline, and no model is built.
 
 - **Pane sizes.** `EdMain.SPLITS` lists the seven `TwoPaneSplitView`
   elements. The sizes go to `EdSettings` (a `ConfigFile`, default
-  `user://settings.cfg`) at each release of the left mouse button and at
-  close. Only a changed value writes the file. `_restore_splits()` applies
+  `user://settings.cfg`) at the end of each drag of a split line (godot-uxml
+  `split_changed`, request R21) and at close. Only a changed value writes the file. `_restore_splits()` applies
   the sizes before the first layout, as numbers between 40 and 4000 px. The
   timeline options (loop, speed, scope) use the same file. The test runner
   and the benchmark use a file of their own.
@@ -460,7 +468,9 @@ dragline, and no model is built.
   text. godot-uxml elides at each layout and at each text change. A
   `LineEdit` placeholder does not elide in Godot:
   `EdUi.elided_placeholder()` shortens it at the width of the field, and
-  the inspector does this again when the fields change width (request R18).
+  the inspector does this again when the fields change width. godot-uxml
+  elides a placeholder now (R18), but only one that changes through the
+  model, which restyles the field (request R28).
   The value-origin labels are such placeholders. The row labels of the
   inspector have a relative `flex-basis` (45%, at most 150 px), so a narrow
   pane keeps room for the fields, and a new name needs no layout. Rows of the lists and trees elide through the
@@ -486,8 +496,8 @@ search is a `uie:ToolbarSearchField`. The diagnostics filters are
 The inspector is a second godot-uxml document. The editor generates its
 UXML once (a skeleton with fixed rows for the common attributes and style
 properties, pairs of extra rows, one block per class and declaration rows) and
-then changes it in place for each selection: field values and
-placeholders go to the `LineEdit` controls, row names and declaration
+then changes it in place for each selection: field values go through
+`set_field_value` (request R17), placeholders to the `LineEdit` controls, row names and declaration
 texts go through `set_text` to `Label` and `Button` controls of a size that does
 not follow the text, and unused rows are `visibility: hidden` (see "Rows in
 use"). A selection needs few restyles and no layout (requests R15, R17 and R22
@@ -508,11 +518,87 @@ one is mounted into a `*-host` element of the window document:
 | `ConfirmationDialog` | save over an external change; recovery (Recover or Discard); a file changed on disk and in the editor (Reload or Keep) | a modal question; godot-uxml has no modal window. `EdMain.ask()` queues the questions, one dialog at a time |
 | `EdDragController` (a `Control` over the window) | drag and drop | draws the drag title at the pointer and the drop line of a before/after drop over a leaf row; godot-uxml runs the drag and draws its own indicator for the other drops (request R12); it ignores the mouse |
 | `ColorPicker` in a `PopupPanel` | inspector colour helper | the picker of godot-uxml `ColorField` (`UxmlEditorWidgets.open_color_picker`), opened for the chosen write target |
-| `Button.self_modulate` | inspector colour swatch | the computed colour without a restyle per selection (request R17) |
+| `Button.self_modulate` | inspector colour swatch | the computed colour without a restyle per selection (a ColorField value restyles, request R17) |
 | `IMGUIContainer` draw callback | timeline tracks, easing curves, state-machine graph | bars, curves, arrows and the playhead are drawings; the element stays in the UXML document, and godot-uxml has no vector shape element for a curve or an arrow |
 | `Popup` | easing picker | the window of the picker, as `UxmlPopupMenu` has one; the content is a godot-uxml document |
-| `LineEdit.placeholder_text` | value-origin labels of the inspector | set directly and shortened by the editor (requests R17, R18) |
+| `LineEdit.placeholder_text` | value-origin labels of the inspector; the search of the command palette per mode | set directly and shortened by the editor (request R28) |
+| `LineEdit.text_changed`, `caret_column` | library search, command palette search | live text as the user types, and the caret after the restyle of a change (request R27) |
+| `JavaScriptBridge` | web project host (`EdWebHost`, `web_host.js`) | the File System Access API, the zip input and the download; a browser API, not UI |
 | `EdCanvasView._draw` | selection outlines, handles, snap guides, the drop hint, the preview badge | drawn over the SubViewport texture at the canvas zoom; not document content |
+
+## Command palette and shortcut map
+
+`EdCommandRegistry` (`src/core`) lists every editor command: id, title,
+category, key bindings, scope and platform. The key handlers of `EdMain`, the
+Edit menu labels, the command palette and the shortcut map read the same
+table, so each shows the current bindings. The settings file can rebind a
+command (section `shortcuts`: `duplicate = "Ctrl+Shift+D"`, `""` for no key).
+A text that does not parse is reported and dropped.
+
+- **Scopes.** `"global"` keys work also while a text field has the focus
+  (Ctrl+S). `"structure"` keys work only when no text field has the focus, so
+  a field keeps Ctrl+C, Delete and the others.
+- **Palette** (`EdCommandPalette`, Ctrl+Shift+P): a godot-uxml document of its
+  own (`ui/command_palette.uxml`, an item template for the rows), over the
+  window. It loads at the first open and then changes in place; while it is
+  closed it is a hidden control and costs nothing. The search is a fuzzy
+  subsequence match (`EdCommandRegistry.fuzzy_score`: consecutive
+  characters, starts of words, an early match). Up and Down choose, Enter runs,
+  Escape or a click outside closes.
+- **Shortcut map** (Ctrl+/): the same document in mode `"shortcuts"`: every
+  command with a binding and the fixed keys of the views (canvas, hierarchy,
+  states, palette), by category, with the same search.
+
+## Packaging
+
+`export_presets.cfg` has four presets. The Windows preset ships the native
+core of godot-uxml (the DLL next to the executable). The Linux, macOS and Web
+presets leave out the DLL and the `.gdextension` file, and their custom
+feature `gdscript_core` makes `EdMain` use the GDScript path. Every preset
+leaves out `tests`, `bench`, `fixtures`, `docs` and `tools`, and includes the
+`.uxml`, `.uss` and `.js` files, which godot-uxml and the web host read as
+files. `--smoke` checks a packaged build: it waits for the render of the
+opened document and prints the core, the platform and the number of rendered
+elements.
+
+The CI workflow (`.github/workflows/ci.yml`) checks the godot-uxml copy against
+the hash in `godot-uxml.pin` (`tools/update_godot_uxml.py --verify`), downloads
+Godot 4.7.1 and runs the suite on the GDScript path on Linux and on both paths
+on Windows.
+
+## Web export
+
+The web export runs the GDScript path (a browser does not load the DLL), the
+Compatibility renderer, and no threads (`variant/thread_support=false`): a
+page needs no cross-origin isolation headers, so any static file server works.
+
+A browser has no directory path for `EdProjectStore`. `EdWebHost` copies the
+project into the Godot file system (`user://web-projects/<name>`), and the
+editor opens that copy with the same store, workspace, journal and render code
+as on the desktop. `src/app/web/web_host.js` (through `JavaScriptBridge`)
+moves the files between the copy and the files of the user. File bytes travel
+as base64 in JSON.
+
+- **File System Access API** (Chrome, Edge): Open shows
+  `showDirectoryPicker`. Before a save the host reads the files of the save
+  again; a file that changed on disk gets the disk bytes in the copy, so the
+  revision check of `EdProjectStore.save` refuses the save as on the desktop,
+  and the editor asks before an overwrite. After the save the host writes each
+  saved file; the script checks `lastModified` and size again just before the
+  write. A file that changed in between is not written: the copy gets the disk
+  bytes, the buffer is unsaved again, and the external-change check asks
+  Reload or Keep. The watch timer reads the open files the same way.
+- **Zip** (other browsers, or `?host=zip`): Open shows a file input for a zip.
+  A zip with one top folder opens that folder. Saves go to the copy (the same
+  revision check), and each save downloads the project as a zip. **Open a
+  project zip** and **Download the project as a zip** are commands of the
+  palette.
+- The first UXML document opens after the project opens.
+- `tools/web_smoke.cjs` runs the export in headless Chrome or Edge: the zip
+  path (open, edit through the palette, Ctrl+S, the downloaded zip has the
+  edit and the other files keep their bytes) and the File System Access path
+  on the origin private file system (open, edit, save, and a change on disk
+  that stops the save).
 
 ## Projects and saving
 
@@ -584,7 +670,11 @@ that keep a frame cheap:
 - A change of the number of rows of the inspector moves content with a
   paint-only `translate`, and a text goes through `set_text` to a label of a
   size that does not follow the text. A selection lays out nothing.
-- A timeline bar drag writes once, and its stylesheet reload waits for a pause.
+- A timeline bar drag writes once, at the release; the partial stylesheet
+  reload of godot-uxml restyles only the elements of the changed rules.
+- The hierarchy scrolls to a selection only when its row is outside the view,
+  and only after a frame without another selection (request R29).
+- The command palette loads at its first open; while closed it costs nothing.
 - The state-machine graph builds on a frame without a change, and only while
   the panel is open.
 
@@ -648,6 +738,17 @@ by its PID.
 - Panels (`test_app_panels.gd`): pane sizes per user, a real drag of a split
   line, long texts that elide with a tooltip, the height of the Classes
   section, the target question of canvas drags.
+- Command palette (`test_command_palette.gd`): shortcut texts, the default
+  bindings (each parses, none twice), the scopes, overrides from the settings,
+  the fuzzy ranking, the shortcut map; in the window: the palette loads at the
+  first open, typing filters, Enter runs one undo step, arrow keys, a click
+  outside, the map and the Edit menu show a rebinding, every command runs, and
+  typing into the library search keeps the order of the characters (R27).
+- Web host (`test_web_host.gd`, a fake of `web_host.js`): a directory opens as
+  a copy, a save writes the disk, a disk change before a save asks before an
+  overwrite, a disk change during a save keeps the edit unsaved, a failed
+  write, the watch timer, a zip opens and a save downloads it, a broken zip.
+  `tools/web_smoke.cjs` runs the real export in a browser.
 - Editing in the app (`tests/unit/test_app_editing.gd`): the input goes
   through the window (`Viewport.push_input`): library insert and search,
   drag from the library to the hierarchy and the canvas, hierarchy
@@ -662,6 +763,8 @@ python tools/update_godot_uxml.py --ref <commit> [--source <checkout-or-url>]
 ```
 
 The script exports `addons/godot_uxml` and the parity cases from the
-commit with `git archive` and writes `godot-uxml.pin`. Run the tests on
+commit with `git archive` (without line-ending conversion, so the copy has the
+bytes of the commit) and writes `godot-uxml.pin` with the number of files and
+a SHA-256 of the copy. `--verify` checks the copy against the pin (CI). Run the tests on
 both paths after an update. ADR 0007 records why the addon is a synced
 copy and not a submodule.

@@ -31,15 +31,10 @@ const PRESETS := [
 	["844 × 390 (phone landscape)", Vector2i(844, 390)],
 ]
 const THEMES := [["Auto theme", "auto"], ["Runtime theme", "runtime"], ["Editor dark", "editor-dark"], ["Editor light", "editor-light"]]
-## Edit menu: [label, command]. The shortcuts work in the canvas and the
-## hierarchy (not while a text field has focus).
-const EDIT_MENU := [
-	["Cut   Ctrl+X", "cut"], ["Copy   Ctrl+C", "copy"], ["Paste   Ctrl+V", "paste"],
-	["Duplicate   Ctrl+D", "duplicate"], ["Delete   Del", "delete"],
-	["Wrap in VisualElement   Ctrl+G", "wrap"], ["Unwrap   Ctrl+Shift+G", "unwrap"],
-	["Move up   Alt+Up", "move-up"], ["Move down   Alt+Down", "move-down"],
-	["Rename element type   F2", "rename"],
-]
+## Edit menu: the commands; the labels show the current bindings of
+## EdCommandRegistry. The shortcuts work in the canvas and the hierarchy (not
+## while a text field has focus).
+const EDIT_MENU := ["cut", "copy", "paste", "duplicate", "delete", "wrap", "unwrap", "move-up", "move-down", "rename"]
 ## Hierarchy context menu: the Edit commands without the rename shortcut
 ## text; [label, command]. "-" is a separator.
 const CONTEXT_MENU := [
@@ -51,8 +46,6 @@ const CONTEXT_MENU := [
 ## The resizable panes (TwoPaneSplitView). Their sizes are per-user
 ## settings (EdSettings, section "layout").
 const SPLITS := ["main-split", "left-split", "hier-split", "right-split", "center-split", "lower-split", "source-split"]
-## Seconds of pause before the render of a timeline bar edit.
-const RELOAD_PAUSE := 0.4
 const SEVERITY_MENU := [["All severities", ""], ["Errors", "error"], ["Warnings", "warning"], ["Info", "info"]]
 const SOURCE_MENU := [["All sources", ""], ["godot-uxml (import)", "godot-uxml"], ["Editor", "editor"]]
 
@@ -67,6 +60,13 @@ var states: EdStateMachineView
 var settings: EdSettings
 var drag: EdDragController
 var layout: EdLayoutController
+## Every command and its key bindings (the palette, the shortcut map and the
+## key handlers read it).
+var commands: EdCommandRegistry
+var command_palette: EdCommandPalette
+## The project host of the platform: a directory picker on the desktop, the
+## File System Access API or a zip in a browser (EdWebHost).
+var web: EdWebHost = null
 var source_path := ""
 var _render_queued := false
 ## The queued render may be a patch (only the entry buffer changed).
@@ -83,7 +83,6 @@ var _render_diags: Dictionary = {}
 var _diag_files: Array = []
 var tabs: EdTabBar
 ## The render of the end of a timeline bar drag waits for this timer.
-var reload_timer: Timer
 ## Disk check timer (external changes).
 var watch_timer: Timer
 ## --watch-interval=0: no disk check on a timer.
@@ -110,9 +109,10 @@ var _tree_rows: Dictionary = {}
 
 
 func _ready() -> void:
-	if OS.get_cmdline_user_args().has("--gdscript") or OS.has_feature("web"):
+	if OS.get_cmdline_user_args().has("--gdscript") or OS.has_feature("web") or OS.has_feature("gdscript_core"):
 		use_gdscript_path()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_process(false)
 	get_window().title = "UXML Editor"
 	get_window().min_size = Vector2i(1000, 600)
 	shell = UxmlDocument.new()
@@ -126,6 +126,12 @@ func _ready() -> void:
 		push_warning("editor shell: " + UxmlDiagnostic.format(d))
 	settings = EdSettings.new(_settings_arg())
 	_restore_splits()
+	commands = EdCommandRegistry.new("web" if OS.has_feature("web") else "desktop")
+	var overrides := {}
+	for id in settings.keys("shortcuts"):
+		overrides[id] = settings.get_value("shortcuts", id)
+	for bad in commands.apply_overrides(overrides):
+		push_warning("settings: the shortcut %s is not a key" % str(bad))
 
 	canvas = EdCanvasView.new()
 	_mount(canvas, "canvas-host")
@@ -146,7 +152,7 @@ func _ready() -> void:
 	shell.menu_chosen.connect(func(i): run_command(CONTEXT_MENU[i][1]))
 	shell.set_context_menu(shell.get_element_model("hierarchy-tree"), _context_items)
 	shell.value_changed.connect(_on_shell_value)
-	shell.set_menu_items("edit-menu", EDIT_MENU.map(func(e): return e[0]), func(i, _t): run_command(EDIT_MENU[i][1]))
+	shell.set_menu_items("edit-menu", edit_menu_labels(), func(i, _t): run_command(EDIT_MENU[i]))
 	shell.set_menu_items("grid-menu", EdLayoutController.GRIDS.map(func(g): return "No grid" if g <= 1 else "Grid %d px" % g), _on_grid)
 	shell.set_menu_items("preset-menu", PRESETS.map(func(p): return p[0]), _on_preset)
 	shell.set_menu_items("theme-menu", THEMES.map(func(t): return t[0]), _on_theme)
@@ -162,7 +168,6 @@ func _ready() -> void:
 	timeline.select_requested.connect(func(id): state.select_id(id, "timeline"))
 	timeline.seeked.connect(canvas.queue_redraw)
 	timeline.settled.connect(inspector.refresh)
-	timeline.flush_render = flush_waiting_render
 	states = EdStateMachineView.new()
 	states.name = "States"
 	add_child(states)
@@ -181,6 +186,7 @@ func _ready() -> void:
 	canvas.nudged.connect(layout.nudge)
 	palette = EdPaletteView.new(shell)
 	palette.refresh()
+	EdUi.live_text(shell, "palette-search", func(t: String): palette.set_query(t))
 	drag = EdDragController.new()
 	drag.shell = shell
 	drag.canvas = canvas
@@ -209,6 +215,7 @@ func _ready() -> void:
 	state.refused.connect(func(_e): _refresh_diagnostics())
 	state.workspace.history.history_changed.connect(_update_history_label)
 	canvas.host.rendered.connect(_on_rendered)
+	shell.split_changed.connect(func(_view, _d): save_splits())
 
 	_dialog = FileDialog.new()
 	_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
@@ -219,11 +226,6 @@ func _ready() -> void:
 	add_child(_dialog)
 	_confirm = ConfirmationDialog.new()
 	add_child(_confirm)
-	reload_timer = Timer.new()
-	reload_timer.one_shot = true
-	reload_timer.wait_time = RELOAD_PAUSE
-	reload_timer.timeout.connect(_on_reload_timer)
-	add_child(reload_timer)
 	watch_timer = Timer.new()
 	watch_timer.wait_time = 2.0
 	watch_timer.timeout.connect(_on_watch_timer)
@@ -235,9 +237,20 @@ func _ready() -> void:
 	_refresh_tabs()
 	if state.session == null:
 		inspector.show_selection(null, null, null)
+	if OS.has_feature("web"):
+		web = EdWebHost.new(self)
+		web.name = "WebHost"
+		add_child(web)
+	command_palette = EdCommandPalette.new()
+	command_palette.registry = commands
+	command_palette.command_chosen.connect(func(id): execute.call_deferred(id))
+	add_child(command_palette)
 	get_window().focus_entered.connect(_on_window_focus)
 	if not _watch_off:
 		watch_timer.start()
+	if web != null:
+		var native := ClassDB.class_exists("UxmlNativeParser") and UxmlParser.use_native
+		print("UXML Editor ready: core %s, renderer %s" % ["native" if native else "GDScript", RenderingServer.get_current_rendering_method()])
 
 
 ## The --settings=<file> option (read before the other options: the pane
@@ -257,7 +270,8 @@ func _restore_splits() -> void:
 			shell.set_split_dimension(sp, clampf(float(d), 40.0, 4000.0))
 
 
-## Keep the pane sizes (after a drag of a split line, and at close).
+## Keep the pane sizes (at the end of a drag of a split line, godot-uxml
+## split_changed, and at close).
 func save_splits() -> void:
 	var changed := false
 	for sp in SPLITS:
@@ -347,6 +361,20 @@ func _parse_args() -> void:
 			f.close()
 	if _args.has("screenshot"):
 		_screenshot.call_deferred(String(_args["screenshot"]))
+	if _args.has("smoke"):
+		_smoke.call_deferred()
+
+
+## The --smoke option (a check of a packaged build): wait for the render,
+## print what runs, quit with 0 when a document rendered.
+func _smoke() -> void:
+	for i in 10:
+		await get_tree().process_frame
+	var native := ClassDB.class_exists("UxmlNativeParser") and UxmlParser.use_native
+	var doc := state.session.entry_path if state.session != null else ""
+	var n: int = canvas.host.element_for_node.size()
+	print("smoke: core %s, platform %s, document %s, %d elements rendered" % ["native" if native else "GDScript", OS.get_name(), doc, n])
+	get_tree().quit(0 if n > 0 else 1)
 
 
 func _screenshot(path: String) -> void:
@@ -373,7 +401,7 @@ func _on_button(element_name: String) -> void:
 		return
 	match element_name:
 		"open-button":
-			_dialog.popup_centered_ratio(0.6)
+			open_project_dialog()
 		"save-button":
 			_save(state.document_files() if state.session != null else [source_path])
 		"save-all-button":
@@ -404,18 +432,38 @@ func _save(paths: Array) -> void:
 	source.flush()
 	if not state.has_project():
 		return
+	# In a browser the disk files are read again first, so the revision
+	# check below sees a change on disk (EdWebHost).
+	if web != null:
+		await web.refresh(paths)
 	var conflicts: Array = []
 	for p in paths:
 		if state.workspace.is_dirty(p) and not EdProjectStore.same_revision(state.store.revision(p), state.workspace.revision(p)):
 			conflicts.append(p)
-	state.save(paths.filter(func(p): return not conflicts.has(p)))
+	_save_now(paths.filter(func(p): return not conflicts.has(p)), false)
 	if not conflicts.is_empty():
+		if web != null:
+			EdWebHost.log_line("asked overwrite " + ", ".join(conflicts))
 		_confirm.dialog_text = "These files changed on disk after they were opened:\n\n%s\n\nOverwrite them with the editor's text?" % "\n".join(conflicts)
 		_confirm.ok_button_text = "Overwrite"
 		for c in _confirm.confirmed.get_connections():
 			_confirm.confirmed.disconnect(c["callable"])
-		_confirm.confirmed.connect(func(): state.save(conflicts, true), CONNECT_ONE_SHOT)
+		_confirm.confirmed.connect(func(): _save_now(conflicts, true), CONNECT_ONE_SHOT)
 		_confirm.popup_centered()
+
+
+## Save `paths` through the store; in a browser, then write the saved files
+## to disk or download the zip (EdWebHost.push).
+func _save_now(paths: Array, force: bool) -> void:
+	var bases := {}
+	for p in paths:
+		if state.workspace.is_dirty(p):
+			bases[p] = (state.workspace.base.get(p, {}) as Dictionary).duplicate(true)
+	state.save(paths, force)
+	if web == null:
+		return
+	var saved: Array = bases.keys().filter(func(p): return not state.workspace.is_dirty(p))
+	web.push(saved, bases, force)
 
 
 func _on_preset(index: int, _text: String) -> void:
@@ -483,30 +531,10 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 	if _structure_shortcut(k):
 		get_viewport().set_input_as_handled()
 		return
-	if not k.is_command_or_control_pressed():
+	var id := commands.command_for(k, "global")
+	if id.is_empty():
 		return
-	match k.keycode:
-		KEY_Z:
-			_redo() if k.shift_pressed else _undo()
-		KEY_Y:
-			_redo()
-		KEY_S:
-			_save(state.workspace.dirty_paths() if k.shift_pressed else (state.document_files() if state.session != null else [source_path]))
-		KEY_O:
-			_dialog.popup_centered_ratio(0.6)
-		KEY_P:
-			set_preview(not canvas.preview)
-		KEY_W:
-			if state.session != null:
-				close_tab(state.session.entry_path)
-		KEY_TAB:
-			cycle_tab(-1 if k.shift_pressed else 1)
-		KEY_EQUAL, KEY_PLUS:
-			canvas.set_zoom(canvas.zoom * 1.25)
-		KEY_MINUS:
-			canvas.set_zoom(canvas.zoom / 1.25)
-		_:
-			return
+	execute(id)
 	get_viewport().set_input_as_handled()
 
 
@@ -521,51 +549,103 @@ func _input(ev: InputEvent) -> void:
 	if drag != null and drag.handle_input(ev):
 		get_viewport().set_input_as_handled()
 		return
-	var mb := ev as InputEventMouseButton
-	if mb != null and not mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-		save_splits.call_deferred()
 	# Alt+Up and Alt+Down move the selection before a list takes them as
 	# plain arrow keys.
 	var k := ev as InputEventKey
-	if k != null and k.pressed and k.alt_pressed and not k.is_command_or_control_pressed() and (k.keycode == KEY_UP or k.keycode == KEY_DOWN):
+	if k != null and k.pressed and k.alt_pressed and not k.is_command_or_control_pressed():
 		if _structure_shortcut(k):
 			get_viewport().set_input_as_handled()
 
 
-## Structure shortcuts. They apply when no text field has focus, so a
-## field keeps Ctrl+C, Delete and the others.
+## Structure shortcuts (scope "structure" of EdCommandRegistry). They apply
+## when no text field has focus, so a field keeps Ctrl+C, Delete and the
+## others.
 func _structure_shortcut(k: InputEventKey) -> bool:
+	if command_palette != null and command_palette.is_open():
+		return false
 	var f := get_viewport().gui_get_focus_owner()
 	if f is LineEdit or f is TextEdit or canvas.preview:
 		return false
-	var ctrl := k.is_command_or_control_pressed()
-	var cmd := ""
-	if ctrl and not k.alt_pressed:
-		match k.keycode:
-			KEY_X:
-				cmd = "cut"
-			KEY_C:
-				cmd = "copy"
-			KEY_V:
-				cmd = "paste"
-			KEY_D:
-				cmd = "duplicate"
-			KEY_G:
-				cmd = "unwrap" if k.shift_pressed else "wrap"
-	elif k.alt_pressed and not ctrl:
-		if k.keycode == KEY_UP:
-			cmd = "move-up"
-		elif k.keycode == KEY_DOWN:
-			cmd = "move-down"
-	elif not ctrl and not k.alt_pressed:
-		if k.keycode == KEY_DELETE:
-			cmd = "delete"
-		elif k.keycode == KEY_F2:
-			cmd = "rename"
+	var cmd := commands.command_for(k, "structure")
 	if cmd.is_empty():
 		return false
 	run_command(cmd)
 	return true
+
+
+## The Edit menu labels with the current bindings.
+func edit_menu_labels() -> Array:
+	return EDIT_MENU.map(func(id): return commands.get_command(id)["title"] + ("" if commands.key_text(id).is_empty() else "   " + commands.key_text(id)))
+
+
+## Run command `id` of EdCommandRegistry (a key, the palette or a test).
+## Returns false for an unknown command.
+func execute(id: String) -> bool:
+	match id:
+		"palette":
+			command_palette.open("commands")
+		"shortcuts":
+			command_palette.open("shortcuts")
+		"open-project":
+			open_project_dialog()
+		"save":
+			_save(state.document_files() if state.session != null else [source_path])
+		"save-all":
+			_save(state.workspace.dirty_paths())
+		"download-zip":
+			if web != null:
+				web.download_zip()
+		"open-zip":
+			if web != null:
+				web.pick_zip()
+		"close-tab":
+			if state.session != null:
+				close_tab(state.session.entry_path)
+		"next-tab":
+			cycle_tab(1)
+		"previous-tab":
+			cycle_tab(-1)
+		"undo":
+			_undo()
+		"redo":
+			_redo()
+		"cut", "copy", "paste", "duplicate", "delete", "wrap", "unwrap", "move-up", "move-down", "rename":
+			run_command(id)
+		"preview":
+			set_preview(not canvas.preview)
+		"zoom-in":
+			canvas.set_zoom(canvas.zoom * 1.25)
+		"zoom-out":
+			canvas.set_zoom(canvas.zoom / 1.25)
+		"fit":
+			canvas.fit()
+		"snap":
+			layout.snap_enabled = not layout.snap_enabled
+			shell.set_field_value("snap-toggle", layout.snap_enabled)
+			state.status.emit("Snapping %s." % ("on" if layout.snap_enabled else "off"), false)
+		"states-panel":
+			states.set_open(not states.open)
+		"theme-auto", "theme-runtime", "theme-editor-dark", "theme-editor-light":
+			for i in THEMES.size():
+				if "theme-" + THEMES[i][1] == id:
+					_on_theme(i, THEMES[i][0])
+		"timeline-play":
+			timeline.toggle_play()
+		"timeline-restart":
+			timeline.restart()
+		"timeline-stop":
+			timeline.stop()
+		_:
+			return false
+	return true
+
+
+## The folder picker of the desktop, or the project picker of the browser.
+func open_project_dialog() -> void:
+	if web != null:
+		web.pick_project()
+	else:
+		_dialog.popup_centered_ratio(0.6)
 
 
 # ---------------------------------------------------------------------------
@@ -721,9 +801,8 @@ func set_preview(on: bool) -> void:
 	states.clear()
 	timeline.stop()
 	canvas.set_preview(on)
-	var t := shell.get_element_model("preview-toggle")
-	if t != null and str(t.get_attribute("value")) != ("true" if on else "false"):
-		t.set_attribute("value", "true" if on else "false")
+	if shell.get_field_value("preview-toggle") != on:
+		shell.set_field_value("preview-toggle", on)
 	if on:
 		canvas.grab_focus()
 	else:
@@ -759,6 +838,8 @@ func _on_watch_timer() -> void:
 	if state.has_project() and _asking == null and state.pending_recovery.is_empty():
 		source.flush()
 		state.check_external_changes(true)
+		if web != null:
+			web.poll()
 
 
 ## Ask a question in a dialog. Questions wait in a queue; one dialog at a
@@ -943,26 +1024,8 @@ func _queue_render(incremental: bool = false) -> void:
 	_render.call_deferred()
 
 
-## Run the render that waits for the pause after a timeline bar edit, now.
-func flush_waiting_render() -> void:
-	if reload_timer == null or reload_timer.is_stopped():
-		return
-	reload_timer.stop()
-	_render_patch = not _render_queued or _render_patch
-	_render()
-
-
-func _on_reload_timer() -> void:
-	if timeline.reload_blocked():
-		reload_timer.start()
-		return
-	_queue_render(state.session != null and not canvas.preview)
-
-
 func _render() -> void:
 	_render_queued = false
-	var waited := not reload_timer.is_stopped()
-	reload_timer.stop()
 	var had_preview := timeline.before_render()
 	var runs := canvas.host.renders + canvas.host.patches
 	if state.session == null or not state.has_project():
@@ -970,9 +1033,9 @@ func _render() -> void:
 		_refresh_diagnostics()
 		return
 	if _render_patch and canvas.host.update(state.workspace, state.session.entry_path):
-		# An undo in the pause after a bar edit: the render has the text
-		# already, and the tracks show the edit no more.
-		if (waited or had_preview) and canvas.host.renders + canvas.host.patches == runs:
+		# The preview of a bar edit showed the text already: the update
+		# changed nothing, and the tracks show the source again.
+		if had_preview and canvas.host.renders + canvas.host.patches == runs:
 			timeline.rendered()
 		return
 	canvas.host.render(state.workspace, state.session.entry_path, state.store.root)
@@ -996,11 +1059,6 @@ func _on_buffers_changed(paths: Array, _cause: String, tx: EdTransaction) -> voi
 		source.reload_from_buffer()
 	elif paths.has(source_path):
 		source.reload_from_buffer()
-	# The end of a bar drag: the preview shows the edit, the render waits.
-	if timeline.defer_next_render:
-		timeline.defer_next_render = false
-		reload_timer.start()
-		return
 	_queue_render(state.session != null and not canvas.preview)
 
 
@@ -1177,6 +1235,34 @@ func _mark_selection_in_source(reveal: bool) -> void:
 	source.mark_range(n.open_start, n.open_end, reveal)
 
 
+## The hierarchy row to scroll to (-1: none) and the frames to wait.
+var _scroll_row := -1
+var _scroll_wait := 0
+
+
+func _process(_dt: float) -> void:
+	if _scroll_row < 0:
+		set_process(false)
+		return
+	_scroll_wait -= 1
+	if _scroll_wait > 0:
+		return
+	var row := _scroll_row
+	_scroll_row = -1
+	set_process(false)
+	shell.scroll_to_item("hierarchy-tree", row)
+
+
+## Row `index` of list `list_name` is bound and inside the view of the list.
+func _row_in_view(list_name: String, index: int) -> bool:
+	var r := shell.get_item_rect(list_name, index)
+	var view := shell.get_element(list_name)
+	if r.size.y <= 0.0 or view == null:
+		return false
+	var v := view.get_global_rect()
+	return r.position.y >= v.position.y - 1.0 and r.end.y <= v.end.y + 1.0
+
+
 func _select_in_tree(nodes: Array) -> void:
 	var ids: Array = nodes.map(func(x): return x.id)
 	if not _tree_dirty and ids == _tree_selected:
@@ -1185,6 +1271,7 @@ func _select_in_tree(nodes: Array) -> void:
 	_tree_selected = ids
 	_syncing = true
 	if nodes.is_empty():
+		_scroll_row = -1
 		shell.set_selection("hierarchy-tree", [])
 		_syncing = false
 		return
@@ -1209,6 +1296,10 @@ func _select_in_tree(nodes: Array) -> void:
 		if _tree_rows.has(n.id) and not found.has(_tree_rows[n.id]):
 			found.append(_tree_rows[n.id])
 	shell.set_selection("hierarchy-tree", found)
-	if not found.is_empty():
-		shell.scroll_to_item("hierarchy-tree", found[0])
+	# A scroll binds the rows again and lays out the whole window (request
+	# R28): only for a row outside the view, and only after a frame without
+	# another selection, so a run of selections scrolls once.
+	_scroll_row = found[0] if not found.is_empty() and not _row_in_view("hierarchy-tree", found[0]) else -1
+	_scroll_wait = 2
+	set_process(_scroll_row >= 0)
 	_syncing = false

@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement class="cp-row">
+        <ui:Label name="cp-category" class="cp-category" text=" " />
+        <ui:Label name="cp-name" class="cp-name" text=" " />
+        <ui:Label name="cp-keys" class="cp-keys" text=" " />
+    </ui:VisualElement>
+</ui:UXML>

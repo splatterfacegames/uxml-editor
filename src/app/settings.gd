@@ -26,6 +26,11 @@ func get_value(section: String, key: String, fallback: Variant = null) -> Varian
 	return _cfg.get_value(section, key)
 
 
+## The keys of `section` ([] when the section does not exist).
+func keys(section: String) -> Array:
+	return Array(_cfg.get_section_keys(section)) if _cfg.has_section(section) else []
+
+
 ## Set a value; returns true when it changed.
 func set_value(section: String, key: String, value: Variant) -> bool:
 	if _cfg.has_section_key(section, key) and _cfg.get_value(section, key) == value:

@@ -399,8 +399,8 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	out.append("<ui:ScrollView name=\"scroll\" class=\"inspector\">")
 	out.append("<ui:Label name=\"empty\" class=\"empty\" text=\"%s\" />" % _x("Select an element in the canvas or the hierarchy."))
 	out.append("<ui:VisualElement name=\"content\" class=\"invisible\">")
-	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"title\" class=\"title\" text=\" \" /></ui:VisualElement>")
-	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"subtitle\" class=\"subtitle\" text=\" \" /></ui:VisualElement>")
+	out.append("<ui:Label name=\"title\" class=\"title\" text=\" \" />")
+	out.append("<ui:Label name=\"subtitle\" class=\"subtitle\" text=\" \" />")
 	out.append("<ui:TextField name=\"element-type\" label=\"Element\" value=\"\" is-delayed=\"true\" class=\"field type-field\" tooltip=\"%s\" />" % _x("The element type (F2). Enter renames the open and close tags."))
 	out.append("<ui:HelpBox name=\"warn-unknown\" class=\"hidden\" message-type=\"Warning\" text=\"%s\" />" % _x("godot-uxml does not know this element. The element stays in the document and renders as a plain box."))
 	out.append("<ui:HelpBox name=\"warn-inexact\" class=\"hidden\" message-type=\"Warning\" text=\"%s\" />" % _x("This file does not decode to its exact bytes. The editor shows it but does not change it."))
@@ -452,13 +452,13 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	# Declarations of the focused property (provenance).
 	out.append("<ui:VisualElement name=\"below-styles\">")
 	out.append("<ui:Foldout name=\"prov-section\" text=\"Declarations\" value=\"true\" class=\"section\">")
-	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"prov-title\" class=\"readout\" text=\" \" /></ui:VisualElement>")
+	out.append("<ui:Label name=\"prov-title\" class=\"readout\" text=\" \" />")
 	for i in PROV_ROWS:
-		out.append("<ui:VisualElement class=\"line\"><ui:Button name=\"prov-%d\" class=\"link prov invisible\" text=\" \" tooltip=\"%s\" /></ui:VisualElement>" % [i, _x("Click to show the declaration in the source view.")])
-	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"prov-targets\" class=\"readout targets\" text=\" \" /></ui:VisualElement>")
+		out.append("<ui:Button name=\"prov-%d\" class=\"link prov invisible\" text=\" \" tooltip=\"%s\" />" % [i, _x("Click to show the declaration in the source view.")])
+	out.append("<ui:Label name=\"prov-targets\" class=\"readout targets\" text=\" \" />")
 	out.append("</ui:Foldout>")
 	out.append("<ui:Foldout name=\"layout-section\" text=\"Layout\" value=\"true\" class=\"section\">")
-	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"layout-readout\" class=\"readout\" text=\" \" /></ui:VisualElement>")
+	out.append("<ui:Label name=\"layout-readout\" class=\"readout\" text=\" \" />")
 	out.append("</ui:Foldout>")
 	# below-styles, below-attrs, below-classes, content.
 	out.append("</ui:VisualElement></ui:VisualElement></ui:VisualElement></ui:VisualElement>")
@@ -688,12 +688,8 @@ func _rows(kind: String, rows: Array, fixed: int, extra: int) -> void:
 
 
 ## The value and the placeholder of a text field. A field with the
-## keyboard focus keeps what the user types.
-## Fast path: neither changes the style or the size of the field, so the
-## text goes straight to the LineEdit and the model attribute changes
-## without a change notification (a godot-uxml restyle of the field costs
-## more than the whole update). The model stays equal to the control, so a
-## later full restyle of godot-uxml writes the same text.
+## keyboard focus keeps what the user types. The value goes through
+## set_field_value (godot-uxml R17: no change notification and no restyle).
 func _value(field: String, value: String, placeholder: String = "") -> void:
 	var c := doc.get_native(field) as LineEdit
 	if c == null:
@@ -708,8 +704,7 @@ func _value(field: String, value: String, placeholder: String = "") -> void:
 	if c.has_focus():
 		return
 	if c.text != value:
-		c.text = value
-	_silent(field, "value", value)
+		doc.set_field_value(field, value)
 
 
 ## The placeholder at the width of the field: a text that does not fit
@@ -742,7 +737,8 @@ func refresh() -> void:
 		_rebuild.call_deferred()
 
 
-## A Toggle value (a model change: the toggle restyles).
+## A Toggle value (set_field_value: the toggle restyles through `:checked`,
+## request R17).
 func _toggle(field: String, on: bool) -> void:
 	var w: Dictionary = _written.get(field, {})
 	var v := "true" if on else "false"
@@ -750,9 +746,8 @@ func _toggle(field: String, on: bool) -> void:
 		return
 	w["value"] = v
 	_written[field] = w
-	var el := doc.get_element_model(field)
-	if el != null and str(el.get_attribute("value")) != v:
-		el.set_attribute("value", v)
+	if doc.get_field_value(field) != on:
+		doc.set_field_value(field, on)
 
 
 func _silent(el_name: String, attr: String, value: String) -> void:
@@ -1406,7 +1401,4 @@ func _text_of(field: String) -> String:
 
 
 func _set_text_of(field: String, text: String) -> void:
-	var c := doc.get_native(field) as LineEdit
-	if c != null:
-		c.text = text
-	_silent(field, "value", text)
+	doc.set_field_value(field, text)

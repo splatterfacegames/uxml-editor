@@ -48,7 +48,7 @@
           <ui:VisualElement class="panel">
             <ui:VisualElement class="panel-header-row">
               <ui:Label class="panel-header" text="Library" />
-              <uie:ToolbarSearchField name="palette-search" class="palette-search grow" tooltip="Filter the elements" />
+              <uie:ToolbarSearchField name="palette-search" class="palette-search grow" is-delayed="true" tooltip="Filter the elements" />
             </ui:VisualElement>
             <ui:TreeView name="palette-tree" fixed-item-height="20" selection-type="Single" class="grow panel-list" tooltip="Double-click or Enter: insert at the selection. Drag: insert at the drop position." />
           </ui:VisualElement>

@@ -21,6 +21,56 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Added (Godot rebuild, milestone 8)
+
+- Command palette (Ctrl+Shift+P): every editor command with a fuzzy search.
+  Up and Down choose, Enter runs, Escape closes. A godot-uxml document of its
+  own that loads at the first open.
+- Shortcut map (Ctrl+/): the current bindings of every command and the keys
+  of the canvas, the hierarchy, the state-machine panel and the palette.
+- `EdCommandRegistry`: one table of commands and key bindings for the key
+  handlers, the Edit menu, the palette and the map. The settings section
+  `[shortcuts]` changes a binding.
+- Export presets: Windows (with the native core of godot-uxml), Linux, macOS
+  and Web (GDScript path, custom feature `gdscript_core`). `--smoke` checks a
+  packaged build.
+- Web export: the Compatibility renderer, no threads (no cross-origin
+  isolation headers), and a project host (`EdWebHost`, `web_host.js`): the
+  File System Access API with the revision checks of the desktop, or a zip
+  that opens from a file input and downloads at each save.
+  `tools/web_smoke.cjs` checks both in headless Chrome or Edge.
+- CI (`.github/workflows/ci.yml`): the GDScript path on Linux, both paths on
+  Windows, and a check of the godot-uxml copy against the pin.
+- `tools/update_godot_uxml.py --verify`; the pin has `addon_sha256`.
+
+### Changed (Godot rebuild, pin `1167eb1`)
+
+- godot-uxml moved to `1167eb1` (requests R17-R26). The update script now
+  copies the bytes of the commit: before, `core.autocrlf` gave the copy CRLF
+  line endings.
+- The render after a timeline bar edit uses the partial stylesheet reload
+  (R25): 317 -> 61 ms native and 1079 -> 473 ms GDScript on the 507-element
+  document. The 0.4 s pause before the render is gone; the release of a bar
+  drag writes and renders.
+- Field values go through `set_field_value` (R17); the timeline run uses
+  `set_author_classes`, `finish_transitions` and `clear_completed_transitions`
+  (R19, R23); the pane sizes save on `split_changed` (R21); the inspector text
+  lines need no `.line` rows (R22); the selected-row rule of `.panel-list` is
+  gone (R24).
+- The state-machine panel takes the timing of each arrow from
+  `preview_transitions` (R26): a property that only the theme changes through
+  `transition-property: all` counts now.
+- The hierarchy scrolls to a selection only when its row is outside the view,
+  and only after a frame without another selection (request R29).
+
+### Fixed
+
+- Typing into the library search reversed the characters: godot-uxml puts the
+  caret of a TextField that is not `is-delayed` at the start at each change
+  (request R27). `EdUi.live_text` keeps the caret.
+- An edge of the state-machine panel ran no transition after an earlier run
+  of the same element ended with an instant change (R23).
+
 ### Added (Godot rebuild, milestone 7)
 
 - State-machine panel, with the **States** toggle of the toolbar: the

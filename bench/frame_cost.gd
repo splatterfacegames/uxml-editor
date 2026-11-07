@@ -224,10 +224,9 @@ func _timeline_scenarios(entry: String) -> void:
 	_m.inspector.choose(0)
 	await _wait(3)
 	print("history after the bar drag: %s" % _m.state.workspace.history.undo_label())
-	# Bar drags with the remembered target: the frame of the release, then
-	# the render after the pause.
+	# Bar drags with the remembered target: the frames of the release (the
+	# write and the render of the write).
 	var rel_ms: Array = []
-	var reload_ms: Array = []
 	for d in 8:
 		r = tl.bar_rect(0)
 		bar = tl.to_global(r.position + Vector2(r.size.x * 0.5, r.size.y * 0.5))
@@ -241,11 +240,8 @@ func _timeline_scenarios(entry: String) -> void:
 		rel_ms.append(await _worst_frame(2))
 		if _m.state.workspace.history.undo_depth() != depth + 1:
 			print("bench: the release of drag %d wrote nothing" % d)
-		_m.flush_waiting_render.call_deferred()
-		reload_ms.append(await _worst_frame(2))
 		await _wait(2)
-	_row_of("timeline: release of a bar drag (write)", rel_ms)
-	_row_of("timeline: render after the pause", reload_ms)
+	_row_of("timeline: release of a bar drag (write, render)", rel_ms)
 	tl.stop()
 	await _wait(2)
 

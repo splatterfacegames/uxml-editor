@@ -107,11 +107,9 @@ func test_each_kind_of_edge_agrees_with_a_run() -> void:
 	var m := await _open()
 	await _select(m, "quit-button")
 	await frames()
-	# Not checked>normal: a transition that ended before an instant change
-	# stops a later run to the same value (request R23).
+	# Also checked>normal after normal>checked: each run starts clean
+	# (clear_completed_transitions, request R23).
 	for e in m.states.model["edges"]:
-		if e["id"] == "checked>normal":
-			continue
 		m.states.select_edge(e["id"])
 		await frames(2)
 		var tracks: int = m.timeline.model.tracks.size()
@@ -150,6 +148,36 @@ func test_the_transitions_of_the_theme_count() -> void:
 	m.states.select_edge("normal>hover")
 	await frames(2)
 	eq((e["timing"] as Array).size(), m.timeline.model.tracks.size(), "the model and the run agree")
+
+
+func test_a_theme_property_through_all_is_a_transition() -> void:
+	# The theme changes background-color on :hover; `all` gives it a
+	# transition. No author rule names the property (request R26).
+	var m := await _open(".menu-button { transition-property: all; transition-duration: 0.5s; }
+.menu-button:hover { margin-left: 3px; }
+")
+	await _select(m, "quit-button")
+	var e := _edge(m, "normal>hover")
+	eq(e["kind"], "transition")
+	var props: Array = (e["timing"] as Array).map(func(t): return t["property"])
+	m.states.select_edge("normal>hover")
+	await frames(2)
+	var run: Array = m.timeline.model.tracks.map(func(t): return t["property"])
+	run.sort()
+	eq(props, run, "the model has the tracks of the run")
+	ok(props.has("background-color"), "the theme property: %s" % [props])
+
+
+func test_the_same_edge_twice_runs_twice() -> void:
+	var m := await _open()
+	await _select(m, "quit-button")
+	await frames()
+	for i in 2:
+		for id in ["hover>normal", "normal>checked", "checked>normal"]:
+			m.states.select_edge(id)
+			await frames(2)
+		eq(m.timeline.model.tracks.size(), (_edge(m, "checked>normal")["timing"] as Array).size(), "round %d: checked>normal runs" % i)
+		ok(m.timeline.model.tracks.size() > 0, "round %d: a track" % i)
 
 
 func test_a_rule_that_changes_nothing_is_an_edge_of_kind_none() -> void:
@@ -553,8 +581,6 @@ func test_a_bar_drag_on_the_run_of_an_edge_keeps_one_undo_step() -> void:
 	if not m.inspector.pending.is_empty():
 		m.inspector.choose(0)
 	await frames(3)
-	m.flush_waiting_render()
-	await frames(3)
 	eq(m.state.workspace.history.undo_depth(), 1, "one step")
 	ok(m.state.workspace.text(MENU_USS) != src)
 	ok(float(_edge(m, "normal>hover")["length"]) > 0.0, "the graph has the new time")
@@ -599,7 +625,7 @@ func test_the_panel_state_and_width_are_kept_per_user() -> void:
 	await frames(3)
 	ok(m.shell.get_element("tl-tracks").size.x < tl_w - 200.0, "the timeline makes room")
 	m.shell.set_split_dimension("states-split", 400.0)
-	mouse_button(m, Vector2(800, 12), false)
+	m.shell.split_changed.emit("states-split", 400.0)
 	await frames()
 	var w2: EdMain = load("res://src/app/main.tscn").instantiate()
 	add_node(w2)

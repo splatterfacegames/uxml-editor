@@ -129,13 +129,16 @@ message. Such an edit changes no file and adds no undo step.
   A drag of the right end of a bar changes `transition-duration`. A
   double-click on a bar opens the easing picker. The edit uses the write
   targets of the inspector and is one undo step. The drag writes the file text
-  at its end. During the drag the canvas shows the new time. Alt or Ctrl during
+  at its end, and the canvas renders the file text in the same frame. During
+  the drag the canvas shows the new time. Alt or Ctrl during
   a drag turns off the snap to 0.05 s. Escape cancels the drag.
 - **State machine.** The **States** toggle opens a panel beside the timeline.
   The panel shows the states of the selected element: normal, hover, pressed,
   focused, checked and disabled. A filled state has rules, with the number of
   rules. A dashed state has no rule. An arrow is a change between two states. A
-  solid arrow has a transition. A dashed arrow is instant. Click a state to
+  solid arrow has a transition. A dashed arrow is instant. The kind of an arrow
+  comes from the transitions that godot-uxml starts for the change, also for a
+  property that only the theme changes. Click a state to
   force the state on the canvas and show the declarations of its rules in the
   inspector. Click an arrow to play the change on the timeline. Up and Down step
   through the states. Escape, a click on the empty graph, another selection and
@@ -168,8 +171,21 @@ message. Such an edit changes no file and adds no undo step.
   for every open document. Filter the list by severity, file and source.
   Select a diagnostic to select its range in the source view and its
   element in the canvas and the hierarchy.
+- **Command palette.** Ctrl+Shift+P opens a list of all editor commands.
+  Type to search: the characters must come in the same order, not next to
+  each other ("tsp" finds "Toggle the state-machine panel"). Up and Down
+  choose a command. Enter runs the command. Escape or a click outside the
+  list closes the palette.
+- **Shortcut map.** Ctrl+/ shows the current key bindings of all commands
+  and the keys of the canvas, the hierarchy and the state-machine panel.
+  Type to search.
+- **Key bindings.** The settings file can change the key of a command, in
+  the section `[shortcuts]`: `duplicate="Ctrl+Shift+D"`. An empty text
+  removes the key. The palette, the shortcut map and the Edit menu show the
+  new key. The command ids are in `src/core/command_registry.gd`.
+- **Web.** The editor also runs in a browser (see "Run in a browser").
 
-`docs/roadmap.md` lists the next milestone: packaging and the web export.
+`docs/roadmap.md` lists the milestones.
 
 ## Screenshots
 
@@ -197,15 +213,90 @@ message. Such an edit changes no file and adds no undo step.
 | `docs/screenshots/m6-narrow-inspector.png` | A narrow inspector: long class rules and value origins end in `...`. |
 | `docs/screenshots/m7-state-node.png` | The state-machine panel: `hover` forced on a button, its rules in the inspector. A dashed state has no rule. |
 | `docs/screenshots/m7-state-edge.png` | The state-machine panel: the change from normal to hover plays on the timeline, paused at 0.6 s. |
+| `docs/screenshots/m8-command-palette.png` | The command palette, filtered by "dup". |
+| `docs/screenshots/m8-shortcut-map.png` | The shortcut map with the current bindings. |
+| `docs/screenshots/m8-web-start.png` | The web export in Chrome before a project opens. |
+| `docs/screenshots/m8-web-edited.png` | The web export in Chrome: a project from a zip, a button duplicated through the palette. |
+| `docs/screenshots/m8-web-fs-saved.png` | The web export with the File System Access API after a save. |
+| `docs/screenshots/m8-web-conflict.png` | The web export: a file changed on disk, and the editor asks before an overwrite. |
 
 ## Requirements
 
-- Godot 4.7.1 (standard build, not .NET).
-- Windows x64 for the native core of godot-uxml. Other platforms use the
-  GDScript path of godot-uxml. The results are the same.
+- Godot 4.7.1 (standard build, not .NET), to run from source or to export.
+- Windows x64 for the native core of godot-uxml. Linux, macOS and the
+  browser use the GDScript path of godot-uxml. The results are the same.
+- The export templates of Godot 4.7.1, only to export.
 - Python 3.10 or later, only to update godot-uxml.
+- Node.js 18 or later and `playwright-core`, only for the browser smoke
+  test.
 
-## Run the editor
+## Install
+
+The editor has no installer. Export a build, or run the editor from the
+source.
+
+### Windows
+
+1. Export: `godot --headless --path . --export-release "Windows Desktop" build/windows/uxml-editor.exe`
+   (make the folder `build/windows` first).
+2. Keep `uxml-editor.exe` and `godot_uxml_native.windows.x86_64.dll` in the
+   same folder. The DLL is the native core of godot-uxml.
+3. Start `uxml-editor.exe`.
+
+### Linux
+
+1. Export: `godot --headless --path . --export-release "Linux" build/linux/uxml-editor.x86_64`.
+2. Make the file executable: `chmod +x uxml-editor.x86_64`.
+3. Start `./uxml-editor.x86_64`. The build uses the GDScript path.
+
+### macOS
+
+1. Export: `godot --headless --path . --export-release "macOS" build/macos/uxml-editor.zip`.
+2. Extract the zip and move `UXML Editor.app` to Applications.
+3. The app has no signature. Open the app with Control+click and **Open**
+   the first time. The build uses the GDScript path.
+
+### Check a build
+
+```
+uxml-editor.exe -- --project=<dir> --open=Assets/UI/Menu.uxml --smoke
+```
+
+`--smoke` opens the document, prints the core, the platform and the number
+of rendered elements, and stops with exit code 0. Add `--headless` before
+`--` for a run without a window.
+
+## Run in a browser
+
+1. Export: `godot --headless --path . --export-release "Web" build/web/index.html`
+   (make the folder `build/web` first).
+2. Serve the folder with any static file server, for example
+   `python -m http.server -d build/web 8000`. The export uses no threads,
+   so the server needs no cross-origin isolation headers.
+3. Open `http://localhost:8000` in Chrome or Edge.
+4. Click **Open Project…** (Ctrl+O) and select the project folder. The
+   browser asks for permission to read and write the folder.
+5. Ctrl+S writes the changed files to the folder. Before the write, the
+   editor reads the files again. When another program changed a file, the
+   editor asks before an overwrite.
+
+Other browsers have no File System Access API. Then **Open Project…** asks
+for a zip of the project, and each save downloads the project as a zip. Add
+`?host=zip` to the address to use the zip in Chrome or Edge too. The palette
+has **Open a project zip** and **Download the project as a zip**.
+
+The browser keeps a copy of the open project in its storage for the site.
+The recovery journal also stays there.
+
+The smoke test opens the export in headless Chrome or Edge and checks both
+ways:
+
+```
+npm install playwright-core
+node tools/web_smoke.cjs
+```
+
+## Run the editor from the source
 
 1. Import the project one time:
 
@@ -235,18 +326,24 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
 | `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
 | `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
-| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states`, `classes`, `timeline`, `timeline-classes`, `easing`, `canvas-picker`, `narrow`, `states-node` or `states-edge`. |
+| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states`, `classes`, `timeline`, `timeline-classes`, `easing`, `canvas-picker`, `narrow`, `states-node`, `states-edge`, `commands` or `shortcuts`. |
 | `--gdscript` | Use the GDScript path of godot-uxml (no native core). |
 | `--recovery-dir=<dir>` | Keep the recovery journals in this directory (default `user://recovery`). |
 | `--watch-interval=<seconds>` | Set the time between disk checks (default 2; 0 turns the timer off). |
-| `--settings=<file>` | Keep the pane sizes, the timeline options and the state of the panels in this file (default `user://settings.cfg`). |
+| `--settings=<file>` | Keep the pane sizes, the timeline options, the state of the panels and the key bindings in this file (default `user://settings.cfg`). |
 | `--ready-file=<path>` | Write this file after the options ran (tests). |
 | `--exit-after=<seconds>` | Stop the editor after this time (tests). |
+| `--smoke` | After the render of the open document, print the core and the number of rendered elements, then stop. |
 
 ## Keyboard shortcuts
 
+These are the default keys. Ctrl+/ shows the current keys in the editor.
+On macOS, Cmd replaces Ctrl.
+
 | Keys | Function |
 | --- | --- |
+| Ctrl+Shift+P | Show all commands (command palette). |
+| Ctrl+/ | Show the keyboard shortcuts. |
 | Ctrl+O | Open a project directory. |
 | Ctrl+S | Save the active document and its stylesheets. |
 | Ctrl+Shift+S | Save all changed files. |
@@ -283,7 +380,8 @@ godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
 ```
 
 The second command uses the native core of godot-uxml. The third command
-uses the GDScript path. Add `--filter=<text>` to run only the tests with
+uses the GDScript path. The CI workflow (`.github/workflows/ci.yml`) runs the
+GDScript path on Linux and both paths on Windows for each push to `godot`. Add `--filter=<text>` to run only the tests with
 that text in the file or test name. The exit code is the number of failed
 tests. One recovery test starts an editor in a child process and stops
 the process by its process ID.
@@ -319,7 +417,9 @@ pin:
 python tools/update_godot_uxml.py --ref <commit> [--source <checkout-or-url>]
 ```
 
-Then run the tests on both paths. `docs/godot-uxml-requests.md` lists the
+Then run the tests on both paths. `python tools/update_godot_uxml.py
+--verify` checks the copy against the SHA-256 in the pin; CI runs this check
+first. `docs/godot-uxml-requests.md` lists the
 godot-uxml APIs that the editor needs.
 
 ## Documentation

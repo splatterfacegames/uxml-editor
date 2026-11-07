@@ -87,11 +87,6 @@ var _shown := {}
 var _tips := {}
 ## The user set the From or the To text: a render keeps it.
 var _custom_states := false
-## The next buffer change comes from the end of a bar drag: the render
-## waits (EdMain._on_buffers_changed).
-var defer_next_render := false
-## Runs the render that waits now (set by the main window).
-var flush_render: Callable
 
 
 func attach(p_shell: UxmlDocument, p_state: EdEditorState, p_host: EdRenderHost, p_inspector: EdInspectorView, p_settings: EdSettings) -> void:
@@ -228,8 +223,6 @@ func states_forced() -> void:
 
 ## End the run: the canvas shows the source and the state preview again.
 func stop() -> void:
-	if flush_render.is_valid():
-		flush_render.call()
 	var was: bool = player != null and player.armed
 	model.playing = false
 	model.time = 0.0
@@ -517,20 +510,17 @@ func _field(element_name: String, text: String) -> void:
 	var c := shell.get_native(element_name) as LineEdit
 	if c == null or c.has_focus() or c.text == text:
 		return
-	c.text = text
+	shell.set_field_value(element_name, text)
 	# A long state can pass the width of the field.
 	if not _tips.has(element_name):
 		_tips[element_name] = c.tooltip_text
 	c.tooltip_text = text + "
 " + String(_tips[element_name])
-	EdUi.set_silent(shell, element_name, "value", text)
 
 
 func _set_toggle(element_name: String, on: bool) -> void:
-	var el := shell.get_element_model(element_name)
-	var v := "true" if on else "false"
-	if el != null and str(el.get_attribute("value")) != v:
-		el.set_attribute("value", v)
+	if shell.get_field_value(element_name) != on:
+		shell.set_field_value(element_name, on)
 
 
 func _menu_text(element_name: String, text: String) -> void:
@@ -690,9 +680,6 @@ func _hover_at(p: Vector2) -> void:
 
 
 func _press(p: Vector2, double: bool, no_snap: bool) -> void:
-	# A drag reads the computed lists: the end write of the last drag first.
-	if flush_render.is_valid():
-		flush_render.call()
 	var h := hit(p)
 	var i: int = h["track"]
 	match String(h["kind"]):
@@ -823,7 +810,7 @@ func _preview_bar() -> void:
 
 
 ## The end of a drag: one write, one undo step. A remembered or only target
-## keeps the preview: the render waits for a pause.
+## keeps the preview until the render of the write (the same frame).
 func _finish_bar() -> void:
 	if _drag.has("pending"):
 		_preview_bar()
@@ -832,15 +819,12 @@ func _finish_bar() -> void:
 		_end_preview()
 		return
 	var ask: bool = d["ask"]
-	if not ask:
-		defer_next_render = true
-	else:
+	if ask:
 		_end_preview()
 	var id := inspector.commit_choice(d["prop"], d["value"], d["id"], d["key"], _target_states())
 	var h := state.workspace.history
 	if id.is_empty():
 		# Refused: no buffer change came.
-		defer_next_render = false
 		_end_preview()
 		_arm_again()
 		return
@@ -895,11 +879,6 @@ func _arm_again() -> void:
 	player.seek(model.time)
 	seeks += 1
 	seeked.emit()
-
-
-## True while a reload would stop a gesture or playback.
-func reload_blocked() -> bool:
-	return not _drag.is_empty() or model.playing
 
 
 ## The render of the source runs next: the preview goes first, so the render

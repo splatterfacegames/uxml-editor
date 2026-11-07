@@ -80,9 +80,8 @@ func attach(p_shell: UxmlDocument, p_state: EdEditorState, p_host: EdRenderHost,
 func set_open(on: bool) -> void:
 	var was := open
 	open = on
-	var t := shell.get_element_model("states-toggle")
-	if t != null and str(t.get_attribute("value")) != ("true" if on else "false"):
-		t.set_attribute("value", "true" if on else "false")
+	if shell.get_field_value("states-toggle") != on:
+		shell.set_field_value("states-toggle", on)
 	if settings.set_value("panels", "states", on):
 		settings.save()
 	if not on:
@@ -213,7 +212,8 @@ func refresh_now() -> void:
 		_redraw()
 		return
 	var id := n.id
-	model = EdStateMachine.build(state.session, n, func(prop: String, q: Dictionary) -> Array: return host.explain(id, prop, q), UssTransitions.SHORTHANDS)
+	model = EdStateMachine.build(state.session, n, func(prop: String, q: Dictionary) -> Array: return host.explain(id, prop, q), UssTransitions.SHORTHANDS,
+		func(a: Array, b: Array) -> Array: return host.preview_transitions(id, a, b))
 	_set_target(n.local + ("" if n.get_attribute("name") == null else " #" + String(n.get_attribute("name"))))
 	if selected.get("kind") == "node":
 		_show_rules_of(EdStateMachine.node_of(model, selected["id"]), false)
