@@ -444,11 +444,11 @@ the 507-element document:
 
 | Step of the render after one `transition-delay` edit | Native | GDScript |
 | --- | --- | --- |
-| `reload_stylesheet` and the element map | 157 ms | |
-| the restyle that the next `get_transitions` runs, and the arm of the run | 128 ms | |
-| the whole frame | 312-408 ms | 1090 ms |
+| `reload_stylesheet` and the element map | 157 ms | not measured |
+| the restyle that the next `get_transitions` runs, and the arm of the run | 128 ms | not measured |
+| the whole frame | 312-420 ms | 1090-1110 ms |
 
-The same edit on the menu fixture: 14 ms native, 18 ms GDScript.
+The same edit on the menu fixture: 14-21 ms native, 18-26 ms GDScript.
 
 Request: when only declarations change and the selectors stay, keep the rule
 matches and restyle only the elements of those rules. A change of only

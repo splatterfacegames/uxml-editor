@@ -290,11 +290,19 @@ rows.
   the run with the restyle 128 ms. A drag now writes once, at its end, and the
   run shows the value through the model during the drag. The render waits for a
   pause of 0.4 s (`EdMain.RELOAD_PAUSE`). Targets: under 16 ms on the menu
-  fixture (reached: 4.9 ms in the drag, 2.0 ms at the release, 15.0 ms for the
-  render); no frame over 100 ms on the large document in the gesture (reached:
-  35 ms in the drag, 1.8 ms at the release). The render after the pause is over
-  the target on the large document: 315 ms, with no gesture running. The cost is
-  in `reload_stylesheet` (request R25).
+  fixture: reached in the drag (4.9 ms) and at the release (2.0 ms); the render
+  after the pause is 15.0 ms with little load and 21 ms under load, so it is at
+  the limit. No frame over 100 ms on the large document: reached in the drag (35
+  ms) and at the release (1.8 ms). The render after the pause is over the target
+  on the large document: 315 ms with little load, 420 ms under load, with no
+  gesture running. The cost is in `reload_stylesheet` (request R25).
+
+The load of the machine changes these numbers. A second run of the same code
+under load: selection on the menu fixture 15.1 ms native (same number of
+classes: 12.6 ms), 18.8 ms GDScript; the large document 23.8 ms native, 65.0 ms
+GDScript. The fixes table has the run with the least load. The runs at the old
+pin and at the new pin had an unknown load too. The inspector lays out nothing
+in every run of the fixes.
 
 ## M7. State-machine panel (done)
 
@@ -335,9 +343,9 @@ the timeline, with From and To as text); states on an ancestor
 | Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
 | --- | --- | --- | --- | --- |
 | states: idle, open | 0.08 (0.09) | 0.07 (0.08) | 0.08 (0.12) | 0.08 (0.09) |
-| states: selection, panel open | 11.3 (15.8) | | 18.2 (21.5) | |
-| states: selection, panel closed | 9.81 (16.4) | | 16.2 (19.6) | |
-| states: one build of the graph | 2.76 (3.34) | | 2.86 (3.08) | |
+| states: selection, panel open | 11.3 (15.8) | 22.1 (29.3) | 18.2 (21.5) | 64.2 (72.1) |
+| states: selection, panel closed | 9.81 (16.4) | 20.8 (28.1) | 16.2 (19.6) | 63.0 (72.1) |
+| states: one build of the graph | 2.76 (3.34) | 2.96 (4.14) | 2.86 (3.08) | 3.06 (3.38) |
 | states: force a node, one per frame | 13.2 (15.8) | 60.2 (68.7) | 20.5 (24.2) | 202 (213) |
 | states: play an edge, one per frame | 11.5 (13.1) | 21.9 (24.2) | 24.3 (27.0) | 160 (164) |
 | states: hover over the graph | 0.19 (1.00) | 0.18 (3.96) | 0.19 (1.11) | 0.19 (4.24) |
