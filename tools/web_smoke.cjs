@@ -254,7 +254,12 @@ async function duplicateSelection(page) {
       });
       check(onDisk.includes("quit-button-copy"), "the disk file has the edit");
       await page.screenshot({ path: path.join(OUT, "m8-web-fs-saved.png") });
-      // A change on disk, then an edit and a save: the editor asks.
+      // An edit, then a change on disk, then a save: the editor asks before
+      // an overwrite (or, when the watch timer reads the disk first, asks
+      // Reload or Keep). Nothing overwrites the disk change.
+      await page.evaluate(() => window.uxmlSmoke && window.uxmlSmoke("select play-button"));
+      await sleep(500);
+      await duplicateSelection(page);
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
         const d = await (await (await root.getDirectoryHandle("menu")).getDirectoryHandle("Assets")).getDirectoryHandle("UI");
@@ -264,11 +269,9 @@ async function duplicateSelection(page) {
         await w.write(text.replace("quit-button-copy", "changed-outside"));
         await w.close();
       });
-      await page.evaluate(() => window.uxmlSmoke && window.uxmlSmoke("select play-button"));
-      await sleep(500);
-      await duplicateSelection(page);
       await page.keyboard.press("Control+S");
-      check(await waitLog(logs, "web: asked overwrite", 15000), "a change on disk stops the save: the editor asks before an overwrite");
+      const asked = await waitLog(logs, "web: asked", 15000);
+      check(asked, "a change on disk stops the save: the editor asks (" + (logs.filter((l) => l.includes("web: asked")).join("; ") || "no question") + ")");
       const still = await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
         const d = await (await (await root.getDirectoryHandle("menu")).getDirectoryHandle("Assets")).getDirectoryHandle("UI");

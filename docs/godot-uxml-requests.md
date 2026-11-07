@@ -419,7 +419,7 @@ timeline bar edit on the 507-element document (`bench/frame_cost.gd`):
 | | native | GDScript |
 | --- | --- | --- |
 | `dc2c081` | 317 ms | 1079 ms |
-| `1167eb1` | 61 ms | 473 ms |
+| `1167eb1` (the frames of the release, write and render) | 59 ms | 480 ms |
 
 The target is 100 ms (native), so the pause of 0.4 s before the render
 (`EdMain.RELOAD_PAUSE`) is gone: the release of a bar drag writes and

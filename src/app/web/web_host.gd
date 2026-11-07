@@ -71,6 +71,7 @@ func _ready() -> void:
 	var w := JavaScriptBridge.get_interface("window")
 	w.uxmlSmoke = _cb(smoke)
 	if main != null:
+		main.state.external_conflicts.connect(func(paths): log_line("asked reload or keep " + ", ".join(PackedStringArray(paths))))
 		main.canvas.host.rendered.connect(func(): log_line("rendered " + main.canvas.host.entry_path))
 
 

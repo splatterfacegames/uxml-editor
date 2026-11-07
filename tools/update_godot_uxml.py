@@ -82,8 +82,9 @@ def tree_hash(root: Path) -> tuple[int, str]:
     """SHA-256 over the sorted relative paths and bytes of every file under root."""
     h = hashlib.sha256()
     count = 0
-    for f in sorted(p for p in root.rglob("*") if p.is_file()):
-        rel = f.relative_to(root).as_posix()
+    # Sort by the POSIX text of the path: a Windows Path sorts without case.
+    files = sorted((p.relative_to(root).as_posix(), p) for p in root.rglob("*") if p.is_file())
+    for rel, f in files:
         h.update(rel.encode() + b"\0" + f.read_bytes() + b"\0")
         count += 1
     return count, h.hexdigest()

@@ -49,7 +49,7 @@ All notable changes to this project are documented here. The format follows
   copies the bytes of the commit: before, `core.autocrlf` gave the copy CRLF
   line endings.
 - The render after a timeline bar edit uses the partial stylesheet reload
-  (R25): 317 -> 61 ms native and 1079 -> 473 ms GDScript on the 507-element
+  (R25): 317 -> 59 ms native and 1079 -> 480 ms GDScript on the 507-element
   document. The 0.4 s pause before the render is gone; the release of a bar
   drag writes and renders.
 - Field values go through `set_field_value` (R17); the timeline run uses

@@ -409,7 +409,7 @@ the view draws (`set_imgui_handler`).
   the godot-uxml model (`EdTransitionPlayer.set_preview`): a restyle of one
   element instead of a stylesheet reload. The release writes, and the render
   of the write runs in the same frame: the partial stylesheet reload of
-  godot-uxml (request R25) costs 61 ms native and 473 ms GDScript on the
+  godot-uxml (request R25) costs 59 ms native and 480 ms GDScript (worst frame) on the
   507-element document. Escape ends the preview; nothing was written. During
   a run the
   targets come from `EdStyleTargets.run_choices()`: the targets of the To

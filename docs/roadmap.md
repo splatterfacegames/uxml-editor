@@ -6,13 +6,14 @@ render, pan, zoom, selection and hit-test, the hierarchy, the source view
 in sync, one undo history, inspector v1 (attributes and inline styles),
 revision-checked saves.
 
-Milestones 2, 3, 4, 5, 6 and 7 (done on the `godot` branch): see the sections
+Milestones 2 to 8 (done on the `godot` branch): see the sections
 below. Screenshots: `docs/screenshots/m2-*.png`, `m3-*.png`, `m4-*.png`,
-`m5-*.png`, `m6-*.png` and `m7-*.png`. Milestone 5 came before milestone 4, after a frame-cost
+`m5-*.png`, `m6-*.png`, `m7-*.png` and `m8-*.png`. Milestone 5 came before milestone 4, after a frame-cost
 pass (see "Frame cost" below). Before milestone 4 the pin moved to
 godot-uxml `6137987` (requests R1-R14), and the editor replaced every
 workaround with the godot-uxml editor APIs (see "Re-pin" below). Before
-milestone 7 the pin moved to `dc2c081` (R15, R16, R11).
+milestone 7 the pin moved to `dc2c081` (R15, R16, R11), and before milestone 8
+to `1167eb1` (R17-R26).
 
 The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
@@ -353,15 +354,91 @@ the timeline, with From and To as text); states on an ancestor
 A build waits for a frame without a change, so a run of selections builds once.
 A node costs one layout of the inspector through the state toggles (R17).
 
-## M8. Packaging and the web export
+## Re-pin to godot-uxml 1167eb1 and three cost fixes (done)
 
-- **Desktop**: export presets for Windows (with the native core) and for
-  Linux and macOS (GDScript path); a CI job that downloads Godot 4.7.1 and
-  runs the suite on the GDScript path on Linux and on both paths on
-  Windows.
-- **Web export**: the GDScript path (the native DLL does not load in a
-  browser), the Compatibility renderer, and a project host for the browser
-  (File System Access API through `JavaScriptBridge`, with the same
-  revision checks; fallback: open and download a zip). The core has no
-  native dependency today, so the work is the host and the file picker.
-- Command palette and a keyboard shortcut map.
+The pin moved from `dc2c081` to `1167eb1` (R17-R26). The editor uses
+`set_field_value` (R17), `set_author_classes`, `finish_transitions` and
+`clear_completed_transitions` (R19, R23), `split_changed` (R21) and
+`preview_transitions` (R26). The `.line` rows (R22), the selected-row rule
+(R24), the copies of the model writes and the derivation of the edge kinds are
+gone (see `docs/godot-uxml-requests.md`). The update script copied the addon
+with CRLF line endings (`core.autocrlf`); the copy now has the bytes of the
+commit, and the pin has its SHA-256.
+
+`bench/frame_cost.gd`, one run per path, median (p95) in ms per frame: before
+the re-pin (`2b47d75`) -> at the end of milestone 8. Other agents loaded the
+machine during the runs.
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| selection | 9.81 -> 10.7 | 16.7 -> 16.8 | 18.0 -> 12.7 | 62.5 -> 17.0 |
+| selection, same number of classes | 8.08 -> 9.08 | 14.3 -> 15.2 | 16.9 -> 12.0 | 61.8 -> 14.7 |
+| window layouts per 60 selections | 0 -> 0 | 0 -> 0 | 37 -> 0 | 37 -> 0 |
+| timeline: render after a bar edit (max) | 13.3 -> 12.8 | 18.8 -> 20.5 | 317 -> 59.1 | 1079 -> 480 |
+| timeline: release of a bar drag | 1.82 | 5.32 | 1.70 | 5.19 |
+| states: one build of the graph | 2.87 -> 3.19 | 3.06 -> 4.25 | 3.02 -> 10.4 | 3.02 -> 20.1 |
+| states: force a node | 15.7 -> 15.1 | 63.4 -> 61.8 | 22.5 -> 23.0 | 202 -> 202 |
+| states: selection, panel open | 14.0 -> 14.4 | 22.3 -> 22.5 | 17.7 -> 13.2 | 63.4 -> 18.7 |
+| drag (move) | 12.2 -> 12.3 | 16.4 -> 15.8 | 29.0 -> 29.5 | 29.5 -> 29.2 |
+| timeline: scrub | 2.31 -> 2.34 | 7.57 -> 7.09 | 2.18 -> 2.27 | 6.10 -> 6.21 |
+
+- **The render after a bar edit.** The partial stylesheet reload (R25) cuts it
+  from 317 to 59 ms on the large document (native). The target is 100 ms, so the
+  0.4 s pause before the render is gone: the release of a bar drag writes and
+  renders in the same frames (the "after" figures). The release alone was
+  1.7-5.3 ms before.
+- **Selection on the large document.** The 37 window layouts per 60
+  selections came from `scroll_to_item` of the hierarchy: a scroll binds the
+  rows again, and the next restyle lays out the whole window (request R29). A
+  selection that scrolls costs about 32 ms native and 98 ms GDScript, one
+  without the scroll 15 ms and 17 ms (two frames per selection). The
+  hierarchy now scrolls only for a row outside the view, and only after a frame
+  without another selection: a run of selections scrolls once. GDScript
+  selection on the large document: 62.5 -> 17.0 ms.
+- **Forcing a state** (GDScript: 62 ms menu, 202 ms large) did not change. A
+  node sets the Toggles of the state preview, and a Toggle value restyles
+  through `:checked` and lays out the inspector (R17, the Toggle part is open);
+  the forced state also restyles the canvas.
+- **The graph build** costs more: `preview_transitions` builds a second cascade
+  (kept until the rules change) and runs ten state changes. A build waits for a
+  frame without a change.
+- **Field values** through `set_field_value` cost about 0.15 ms each against
+  0.02 ms for a direct `LineEdit` write: selection on the menu fixture went from
+  9.8 to 10.4-10.7 ms native.
+
+## M8. Packaging and the web export (done)
+
+Done:
+
+- **Desktop.** Export presets for Windows (with the native core), Linux and
+  macOS (GDScript path, custom feature `gdscript_core`). The Windows build
+  exported here starts, opens the menu fixture, renders 6 elements on the
+  native core and exits with 0 (`--smoke`, with a window and headless). The
+  Linux and macOS builds export here; they did not run here.
+- **CI** (`.github/workflows/ci.yml`): checks the godot-uxml copy against the
+  pin, downloads Godot 4.7.1, and runs the suite on the GDScript path on Linux
+  and on both paths on Windows. The copy is in the repository (ADR 0007), so
+  CI needs no access to godot-uxml.
+- **Web export.** The GDScript path, the Compatibility renderer, no threads (no
+  cross-origin isolation headers). `EdWebHost` copies the project into the
+  Godot file system and moves the files with the File System Access API (with
+  the revision checks of the desktop before and during a save) or a zip (open
+  from a file input, download at each save). `tools/web_smoke.cjs` runs the
+  export in headless Chrome: the zip path (open, edit through the palette, save,
+  the downloaded zip has the edit and the other files keep their bytes) and the
+  File System Access path on the origin private file system (open, edit, save,
+  and a change on disk that stops the save).
+- **Command palette and shortcut map** in UXML/USS (`EdCommandPalette`), from
+  one command table (`EdCommandRegistry`) with bindings that the settings can
+  change.
+- A fix: typing into the library search reversed the characters (request
+  R27).
+
+Screenshots: `docs/screenshots/m8-*.png`.
+
+Not done: a signed and notarized macOS build; an installer; a run of the Linux
+and macOS builds (CI runs the suite on Linux from the source, not the export);
+a rebinding editor in the shortcut map (the settings file changes a binding);
+the browser has no system fonts, so a few symbols of the window (▶, ∿, ▾) show
+as boxes; File System Access needs Chrome or Edge, and other browsers use the
+zip; a project over 64 MB does not open in the browser.
