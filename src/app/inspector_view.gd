@@ -31,6 +31,8 @@ var _node: EdUxmlNode = null
 var _fields: Dictionary = {}
 var _host: EdRenderHost = null
 var _pending := false
+var _count := 1
+var _focus_type := false
 
 
 func _init() -> void:
@@ -44,10 +46,11 @@ func _init() -> void:
 	doc.button_pressed.connect(_on_button)
 
 
-func show_selection(session: EdDocumentSession, node: EdUxmlNode, host: EdRenderHost) -> void:
+func show_selection(session: EdDocumentSession, node: EdUxmlNode, host: EdRenderHost, count: int = 1) -> void:
 	_session = session
 	_node = node
 	_host = host
+	_count = count
 	if not _pending:
 		_pending = true
 		_rebuild.call_deferred()
@@ -62,6 +65,21 @@ func _rebuild() -> void:
 	doc.load_source(_generate(), "res://src/app/ui/__inspector__.uxml", "res://src/app/ui")
 	if offset != Vector2.ZERO:
 		doc.set_scroll_offset("scroll", offset)
+	if _focus_type:
+		_focus_type = false
+		focus_type_field()
+
+
+## Put the keyboard focus in the element type field (F2: rename).
+func focus_type_field() -> void:
+	if _pending:
+		_focus_type = true
+		return
+	var c := doc.get_native("element-type")
+	if c != null:
+		c.grab_focus()
+		if c is LineEdit:
+			(c as LineEdit).select_all()
 
 
 func _generate() -> String:
@@ -83,7 +101,16 @@ func _generate() -> String:
 		out.append("<ui:Label class=\"title-name\" text=\"%s\" />" % _x("#" + String(authored)))
 	out.append("</ui:VisualElement>")
 	var src := _session.source()
-	out.append("<ui:Label class=\"subtitle\" text=\"%s\" />" % _x("%s  ·  line %d" % [_session.entry_path.get_file(), src.substr(0, n.open_start).count("\n") + 1]))
+	var sub := "%s  ·  line %d" % [_session.entry_path.get_file(), src.substr(0, n.open_start).count("\n") + 1]
+	if _count > 1:
+		sub += "  ·  +%d more selected" % (_count - 1)
+	out.append("<ui:Label class=\"subtitle\" text=\"%s\" />" % _x(sub))
+	if n.parent != null:
+		_fields["element-type"] = {"kind": "tag", "name": ""}
+		out.append("<ui:TextField name=\"element-type\" label=\"Element\" value=\"%s\" is-delayed=\"true\" class=\"field type-field\" tooltip=\"%s\" />" % [
+			_x(n.name), _x("The element type (F2). Enter renames the open and close tags.")])
+	if n.parent != null and not EdElementCatalog.is_known(n.local):
+		out.append("<ui:HelpBox message-type=\"Warning\" text=\"%s\" />" % _x("godot-uxml does not know <%s>. The element stays in the document and renders as a plain box." % n.name))
 	if not _session.workspace.buffer(_session.entry_path).exact:
 		out.append("<ui:HelpBox message-type=\"Warning\" text=\"%s\" />" % _x("This file does not decode to its exact bytes. The editor shows it but does not change it."))
 
@@ -207,6 +234,12 @@ func _on_value_changed(field: String, value: Variant) -> void:
 		return
 	var f: Dictionary = _fields[field]
 	var v := String(value)
+	if f["kind"] == "tag":
+		var tag := v.strip_edges()
+		if tag.is_empty() or tag == _node.name:
+			return
+		command.emit(EdUxmlCommands.rename_element(_session, _locator(), tag), "inspector")
+		return
 	if f["kind"] == "attr":
 		var cur = _node.get_attribute(f["name"])
 		if (cur == null and v.is_empty()) or (cur != null and String(cur) == v):

@@ -77,7 +77,7 @@ func test_canvas_hit_test_selects_and_syncs_views() -> void:
 	ok(r.has_area(), "the button has a rectangle")
 	var id := m.canvas.host.hit_test(r.get_center())
 	eq(id, play.id, "hit-test finds the deepest authored element")
-	m.canvas.picked.emit(id)
+	m.canvas.picked.emit(id, false)
 	await _frames()
 	eq(m.state.selected_node(), play)
 	eq(m.canvas.selected_id, play.id, "canvas overlay follows")

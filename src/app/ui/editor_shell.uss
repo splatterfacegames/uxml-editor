@@ -110,3 +110,13 @@
 .status-label.error {
     color: rgb(240, 120, 110);
 }
+
+.palette-search {
+    margin-left: 6px;
+    margin-right: 4px;
+    align-self: center;
+}
+
+#grid-menu {
+    min-width: 80px;
+}

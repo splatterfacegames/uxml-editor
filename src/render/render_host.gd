@@ -23,6 +23,9 @@ var diagnostics: Array = []
 var theme_mode: String = "auto"
 var last_render_ms: float = 0.0
 var entry_path: String = ""
+var _root: String = ""
+## EdBufferResolver.key(absolute path) -> workspace path, for every buffer.
+var _paths_by_key: Dictionary = {}
 
 
 func _init() -> void:
@@ -58,6 +61,7 @@ func set_screen_size(s: Vector2i) -> void:
 func render(ws: EdWorkspace, entry: String, root_abs: String) -> void:
 	var t0 := Time.get_ticks_usec()
 	entry_path = entry
+	_root = root_abs
 	if doc == null:
 		_make_doc()
 	match theme_mode:
@@ -76,8 +80,10 @@ func render(ws: EdWorkspace, entry: String, root_abs: String) -> void:
 			doc.editor_theme = "auto"
 			doc.editor_skin = "dark"
 	var resolver := EdBufferResolver.new(root_abs)
+	_paths_by_key.clear()
 	for p in ws.buffers:
 		resolver.set_override(root_abs + "/" + p, ws.text(p))
+		_paths_by_key[EdBufferResolver.key(root_abs + "/" + p)] = p
 	_load_source(ws.text(entry), root_abs + "/" + entry, resolver)
 	_map(ws.uxml(entry))
 	last_render_ms = (Time.get_ticks_usec() - t0) / 1000.0
@@ -141,6 +147,9 @@ func rect_of(id: int) -> Rect2:
 ## The deepest authored element under `point` (viewport pixels), or -1.
 ## Elements with picking-mode="Ignore" still hit: the editor selects what
 ## the author wrote, not what the game would pick.
+## Workaround for request R8: the point is tested in the local space of
+## each control (so rotate, scale and translate apply, as godot-uxml sets
+## them on the Control transform) and of every clipping ancestor.
 func hit_test(point: Vector2) -> int:
 	var best := -1
 	var best_depth := -1
@@ -148,7 +157,7 @@ func hit_test(point: Vector2) -> int:
 		var c := control_of(id)
 		if c == null or not c.is_visible_in_tree():
 			continue
-		if not _clipped_rect(c).has_point(point):
+		if not _hits(c, point):
 			continue
 		var depth := _depth(element_for_node[id])
 		if depth > best_depth or (depth == best_depth and id > best):
@@ -157,17 +166,23 @@ func hit_test(point: Vector2) -> int:
 	return best
 
 
-## The control rectangle cut by every clipping ancestor (ScrollView
-## viewports, overflow: hidden).
-func _clipped_rect(c: Control) -> Rect2:
-	var r := c.get_global_rect()
+## True when `point` is inside `c` and inside every clipping ancestor
+## (ScrollView viewports, overflow: hidden), transforms applied.
+func _hits(c: Control, point: Vector2) -> bool:
+	if not _local_has(c, point):
+		return false
 	var p := c.get_parent()
 	while p != null and p != doc and p is Control:
 		var pc := p as Control
-		if pc.clip_contents:
-			r = r.intersection(pc.get_global_rect())
+		if pc.clip_contents and not _local_has(pc, point):
+			return false
 		p = p.get_parent()
-	return r
+	return true
+
+
+static func _local_has(c: Control, point: Vector2) -> bool:
+	var local := c.get_global_transform().affine_inverse() * point
+	return Rect2(Vector2.ZERO, c.size).has_point(local)
 
 
 func _depth(el: UxmlElement) -> int:
@@ -186,3 +201,83 @@ func computed_style(id: int) -> Dictionary:
 	if el == null:
 		return {}
 	return doc._styles.get(el, {})
+
+
+## The editor node id of the authored parent of `id` (-1 for the root or
+## an unmapped parent).
+func parent_id(id: int) -> int:
+	var el = element_for_node.get(id)
+	if el == null:
+		return -1
+	var p = doc._parents.get(el)
+	while p != null:
+		if node_for_element.has(p):
+			return node_for_element[p]
+		p = doc._parents.get(p)
+	return -1
+
+
+## The computed style of `id` for EdLayoutCommands: property ->
+## {value: String, origin}. Origins are normalized: a rule of a project
+## stylesheet becomes {kind: "rule", path: <workspace path>, item,
+## decl_index, states}; a rule of a godot-uxml theme becomes
+## {kind: "theme"}; inline and inherited keep their shape.
+## Seam for requests R2 and R5: the cascade output is read from the
+## document internals today.
+func style_facts(id: int) -> Dictionary:
+	var out := {}
+	var cs := computed_style(id)
+	for prop in cs:
+		var e = cs[prop]
+		if typeof(e) != TYPE_DICTIONARY:
+			out[prop] = {"value": str(e), "origin": {"kind": "default"}}
+			continue
+		out[prop] = {"value": str(e.get("value", "")), "origin": _normalize_origin(e.get("origin", {}))}
+	return out
+
+
+func _normalize_origin(o: Variant) -> Dictionary:
+	if typeof(o) != TYPE_DICTIONARY:
+		return {"kind": "default"}
+	match String(o.get("kind", "")):
+		"rule":
+			var path := workspace_path(String(o.get("file", "")))
+			if path.is_empty():
+				return {"kind": "theme"}
+			var r := {"kind": "rule", "path": path, "item": int(o.get("item", -1)), "decl_index": int(o.get("decl_index", -1))}
+			if o.has("states"):
+				r["states"] = (o["states"] as Array).duplicate()
+			return r
+		"inline":
+			return {"kind": "inline", "decl_index": int(o.get("decl_index", -1))}
+		"inherited":
+			return {"kind": "inherited", "origin": _normalize_origin(o.get("origin", {}))}
+	return {"kind": "default"}
+
+
+## The workspace path of a file that the render read, or "" when the file
+## is not in the project (a godot-uxml theme).
+func workspace_path(file: String) -> String:
+	if file.is_empty():
+		return ""
+	return _paths_by_key.get(EdBufferResolver.key(file), "")
+
+
+## The border widths (left, top) of `id` in px.
+func border_start(id: int) -> Vector2:
+	var cs := computed_style(id)
+	return Vector2(float(EdLayoutCommands.px(cs.get("border-left-width")) if EdLayoutCommands.px(cs.get("border-left-width")) != null else 0.0),
+		float(EdLayoutCommands.px(cs.get("border-top-width")) if EdLayoutCommands.px(cs.get("border-top-width")) != null else 0.0))
+
+
+## The rectangles of the rendered authored siblings of `id`.
+func sibling_rects(id: int) -> Array:
+	var pid := parent_id(id)
+	var out: Array = []
+	for other in element_for_node:
+		if other == id or parent_id(other) != pid:
+			continue
+		var r := rect_of(other)
+		if r.has_area():
+			out.append(r)
+	return out

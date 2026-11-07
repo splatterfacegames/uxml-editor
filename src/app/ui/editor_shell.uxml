@@ -15,6 +15,7 @@
       <uie:ToolbarSpacer />
       <uie:ToolbarButton name="undo-button" text="Undo" tooltip="Undo (Ctrl+Z)" />
       <uie:ToolbarButton name="redo-button" text="Redo" tooltip="Redo (Ctrl+Y)" />
+      <uie:ToolbarMenu name="edit-menu" text="Edit" tooltip="Structure commands for the selection" />
       <uie:ToolbarSpacer />
       <uie:ToolbarMenu name="preset-menu" text="1280 × 720" tooltip="Screen size of the canvas" />
       <uie:ToolbarMenu name="theme-menu" text="Auto theme" tooltip="Theme the document renders with" />
@@ -23,19 +24,32 @@
       <ui:Label name="zoom-label" class="zoom-label" text="100%" />
       <uie:ToolbarButton name="zoom-in-button" text="+" tooltip="Zoom in (Ctrl+=)" />
       <uie:ToolbarButton name="fit-button" text="Fit" tooltip="Fit the screen in the canvas (F)" />
+      <uie:ToolbarSpacer />
+      <uie:ToolbarToggle name="snap-toggle" text="Snap" value="true" tooltip="Snap moves and resizes to siblings, the parent and the grid (Alt or Ctrl while dragging turns snapping off)" />
+      <uie:ToolbarMenu name="grid-menu" text="Grid 8 px" tooltip="Pixel grid for snapping" />
+      <uie:ToolbarToggle name="preview-toggle" text="Preview" tooltip="Send mouse and keyboard input to the document (Ctrl+P)" />
       <uie:ToolbarSpacer class="grow" />
       <ui:Label name="document-label" class="document-label" text="No project" />
     </uie:Toolbar>
     <ui:TwoPaneSplitView name="main-split" fixed-pane-index="0" fixed-pane-initial-dimension="280" class="grow">
-      <ui:TwoPaneSplitView name="left-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="220">
+      <ui:TwoPaneSplitView name="left-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="150">
         <ui:VisualElement class="panel">
           <ui:Label class="panel-header" text="Project" />
           <ui:ListView name="files-list" fixed-item-height="20" selection-type="Single" class="grow panel-list" />
         </ui:VisualElement>
-        <ui:VisualElement class="panel">
-          <ui:Label class="panel-header" text="Hierarchy" />
-          <ui:TreeView name="hierarchy-tree" auto-expand="true" fixed-item-height="20" selection-type="Single" class="grow panel-list" />
-        </ui:VisualElement>
+        <ui:TwoPaneSplitView name="hier-split" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="300">
+          <ui:VisualElement class="panel">
+            <ui:Label class="panel-header" text="Hierarchy" />
+            <ui:TreeView name="hierarchy-tree" auto-expand="true" fixed-item-height="20" selection-type="Multiple" class="grow panel-list" />
+          </ui:VisualElement>
+          <ui:VisualElement class="panel">
+            <ui:VisualElement class="panel-header-row">
+              <ui:Label class="panel-header" text="Library" />
+              <uie:ToolbarSearchField name="palette-search" class="palette-search grow" tooltip="Filter the elements" />
+            </ui:VisualElement>
+            <ui:TreeView name="palette-tree" fixed-item-height="20" selection-type="Single" class="grow panel-list" tooltip="Double-click or Enter: insert at the selection. Drag: insert at the drop position." />
+          </ui:VisualElement>
+        </ui:TwoPaneSplitView>
       </ui:TwoPaneSplitView>
       <ui:TwoPaneSplitView name="right-split" fixed-pane-index="1" fixed-pane-initial-dimension="340">
         <ui:TwoPaneSplitView name="center-split" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="280">

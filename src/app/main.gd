@@ -12,6 +12,9 @@ extends Control
 ##   --source=<path>      show this file in the source view
 ##   --screenshot=<png>   save a screenshot after the first renders, then quit
 ##   --script-edit=<a=b>  demo: set attribute a to b on the selection first
+##   --demo=<name>        stage a documentation state before the screenshot
+##                        (EdDemo: palette, drag-canvas, drag-hierarchy,
+##                        resize, multi, preview)
 
 const SHELL := "res://src/app/ui/editor_shell.uxml"
 const PRESETS := [
@@ -21,12 +24,24 @@ const PRESETS := [
 	["844 × 390 (phone landscape)", Vector2i(844, 390)],
 ]
 const THEMES := [["Auto theme", "auto"], ["Runtime theme", "runtime"], ["Editor dark", "editor-dark"], ["Editor light", "editor-light"]]
+## Edit menu: [label, command]. The shortcuts work in the canvas and the
+## hierarchy (not while a text field has focus).
+const EDIT_MENU := [
+	["Cut   Ctrl+X", "cut"], ["Copy   Ctrl+C", "copy"], ["Paste   Ctrl+V", "paste"],
+	["Duplicate   Ctrl+D", "duplicate"], ["Delete   Del", "delete"],
+	["Wrap in VisualElement   Ctrl+G", "wrap"], ["Unwrap   Ctrl+Shift+G", "unwrap"],
+	["Move up   Alt+Up", "move-up"], ["Move down   Alt+Down", "move-down"],
+	["Rename element type   F2", "rename"],
+]
 
 var state := EdEditorState.new()
 var shell: UxmlDocument
 var canvas: EdCanvasView
 var source: EdSourceView
 var inspector: EdInspectorView
+var palette: EdPaletteView
+var drag: EdDragController
+var layout: EdLayoutController
 var source_path := ""
 var _render_queued := false
 var _syncing := false
@@ -62,10 +77,28 @@ func _ready() -> void:
 
 	shell.button_pressed.connect(_on_button)
 	shell.selection_changed.connect(_on_list_selection)
+	shell.items_chosen.connect(_on_items_chosen)
+	shell.value_changed.connect(_on_shell_value)
+	shell.set_menu_items("edit-menu", EDIT_MENU.map(func(e): return e[0]), func(i, _t): run_command(EDIT_MENU[i][1]))
+	shell.set_menu_items("grid-menu", EdLayoutController.GRIDS.map(func(g): return "No grid" if g <= 1 else "Grid %d px" % g), _on_grid)
 	shell.set_menu_items("preset-menu", PRESETS.map(func(p): return p[0]), _on_preset)
 	shell.set_menu_items("theme-menu", THEMES.map(func(t): return t[0]), _on_theme)
-	canvas.picked.connect(func(id): state.select_id(id, "canvas"))
+	canvas.picked.connect(_on_canvas_picked)
 	canvas.view_changed.connect(_update_zoom_label)
+	layout = EdLayoutController.new(state, canvas)
+	canvas.gesture_started.connect(layout.begin)
+	canvas.gesture_moved.connect(layout.update)
+	canvas.gesture_finished.connect(layout.finish)
+	canvas.nudged.connect(layout.nudge)
+	palette = EdPaletteView.new(shell)
+	palette.refresh()
+	drag = EdDragController.new()
+	drag.shell = shell
+	drag.canvas = canvas
+	drag.state = state
+	drag.palette = palette
+	add_child(drag)
+	drag.dropped.connect(_on_dropped)
 	source.edited.connect(func(tx): state.execute(tx, "source"))
 	source.caret_moved_to.connect(_on_source_caret)
 	source.undo_requested.connect(_undo)
@@ -150,6 +183,8 @@ func _parse_args() -> void:
 func _screenshot(path: String) -> void:
 	for i in 20:
 		await get_tree().process_frame
+	if _args.has("demo"):
+		await EdDemo.stage(self, String(_args["demo"]))
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()
 	var abs_path := path if path.is_absolute_path() else ProjectSettings.globalize_path("res://").path_join(path)
@@ -258,7 +293,12 @@ func _on_status(message: String, is_error: bool) -> void:
 
 func _unhandled_key_input(ev: InputEvent) -> void:
 	var k := ev as InputEventKey
-	if k == null or not k.pressed or not k.is_command_or_control_pressed():
+	if k == null or not k.pressed:
+		return
+	if _structure_shortcut(k):
+		get_viewport().set_input_as_handled()
+		return
+	if not k.is_command_or_control_pressed():
 		return
 	match k.keycode:
 		KEY_Z:
@@ -269,6 +309,8 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 			_save(state.workspace.dirty_paths() if k.shift_pressed else (state.document_files() if state.session != null else [source_path]))
 		KEY_O:
 			_dialog.popup_centered_ratio(0.6)
+		KEY_P:
+			set_preview(not canvas.preview)
 		KEY_EQUAL, KEY_PLUS:
 			canvas.set_zoom(canvas.zoom * 1.25)
 		KEY_MINUS:
@@ -279,12 +321,211 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 
 
 func _input(ev: InputEvent) -> void:
-	# Delete removes the selected element when the canvas has focus.
-	if ev is InputEventKey and ev.pressed and (ev as InputEventKey).keycode == KEY_DELETE and canvas.has_focus():
-		var n := state.selected_node()
-		if n != null:
-			state.execute(EdUxmlCommands.remove_element(state.session, state.selection[0]), "canvas")
+	if canvas.preview:
+		if ev is InputEventMouseButton and ev.pressed and not canvas.get_global_rect().has_point(ev.global_position):
+			canvas.keys_to_document = false
+		elif ev is InputEventKey and canvas.keys_to_document and not EdCanvasView.is_editor_key(ev):
+			canvas.forward_input(ev)
 			get_viewport().set_input_as_handled()
+			return
+	if drag != null and drag.handle_input(ev):
+		get_viewport().set_input_as_handled()
+		return
+	# Alt+Up and Alt+Down move the selection before a list takes them as
+	# plain arrow keys.
+	var k := ev as InputEventKey
+	if k != null and k.pressed and k.alt_pressed and not k.is_command_or_control_pressed() and (k.keycode == KEY_UP or k.keycode == KEY_DOWN):
+		if _structure_shortcut(k):
+			get_viewport().set_input_as_handled()
+
+
+## Structure shortcuts. They apply when no text field has focus, so a
+## field keeps Ctrl+C, Delete and the others.
+func _structure_shortcut(k: InputEventKey) -> bool:
+	var f := get_viewport().gui_get_focus_owner()
+	if f is LineEdit or f is TextEdit or canvas.preview:
+		return false
+	var ctrl := k.is_command_or_control_pressed()
+	var cmd := ""
+	if ctrl and not k.alt_pressed:
+		match k.keycode:
+			KEY_X:
+				cmd = "cut"
+			KEY_C:
+				cmd = "copy"
+			KEY_V:
+				cmd = "paste"
+			KEY_D:
+				cmd = "duplicate"
+			KEY_G:
+				cmd = "unwrap" if k.shift_pressed else "wrap"
+	elif k.alt_pressed and not ctrl:
+		if k.keycode == KEY_UP:
+			cmd = "move-up"
+		elif k.keycode == KEY_DOWN:
+			cmd = "move-down"
+	elif not ctrl and not k.alt_pressed:
+		if k.keycode == KEY_DELETE:
+			cmd = "delete"
+		elif k.keycode == KEY_F2:
+			cmd = "rename"
+	if cmd.is_empty():
+		return false
+	run_command(cmd)
+	return true
+
+
+# ---------------------------------------------------------------------------
+# Structure commands
+# ---------------------------------------------------------------------------
+
+## Run an Edit menu command on the selection. Returns true when the
+## buffers changed (or, for copy, when the clipboard did).
+func run_command(cmd: String) -> bool:
+	source.flush()
+	if state.session == null:
+		return false
+	var nodes := EdStructureCommands.top_level(state.selected_nodes())
+	var locs: Array = nodes.map(func(n): return EdLocator.create(n))
+	var s := state.session
+	match cmd:
+		"copy", "cut":
+			if nodes.is_empty():
+				return _refuse("Select an element to %s." % cmd)
+			var p = EdClipboard.copy(s, locs)
+			if p is EdError:
+				return state.execute(p)
+			EdClipboard.copy_to_system(p)
+			if cmd == "copy":
+				state.status.emit("Copied %d element%s." % [nodes.size(), "" if nodes.size() == 1 else "s"], false)
+				return true
+			var rm = EdStructureCommands.remove_elements(s, locs)
+			if rm is EdTransaction:
+				rm.label = "Cut %s" % nodes[0].local if nodes.size() == 1 else "Cut %d elements" % nodes.size()
+			return state.execute(rm, "edit")
+		"paste":
+			var text := EdClipboard.system_text()
+			var payload = null
+			if text.is_empty() and not EdClipboard.last_payload.is_empty():
+				payload = EdClipboard.last_payload.duplicate(true)
+			else:
+				payload = EdClipboard.payload_from_text(text)
+			if payload is EdError:
+				return state.execute(payload)
+			var ip := EdStructureCommands.insertion_point(s, state.selected_node())
+			return state.execute(EdClipboard.paste(s, EdLocator.create(ip["parent"]), ip["index"], payload), "edit")
+		"duplicate":
+			if nodes.is_empty():
+				return _refuse("Select an element to duplicate.")
+			return state.execute(EdClipboard.duplicate_elements(s, locs), "edit")
+		"delete":
+			if nodes.is_empty():
+				return false
+			return state.execute(EdStructureCommands.remove_elements(s, locs), "edit")
+		"wrap":
+			if nodes.is_empty():
+				return _refuse("Select the elements to wrap.")
+			return state.execute(EdStructureCommands.wrap_in(s, locs), "edit")
+		"unwrap":
+			if nodes.size() != 1:
+				return _refuse("Select one element to unwrap.")
+			return state.execute(EdStructureCommands.unwrap_element(s, locs[0]), "edit")
+		"move-up", "move-down":
+			if nodes.is_empty() or nodes[0].parent == null:
+				return false
+			var parent: EdUxmlNode = nodes[0].parent
+			var first: int = nodes[0].index_in_parent
+			var last: int = nodes[-1].index_in_parent
+			if (cmd == "move-up" and first == 0) or (cmd == "move-down" and last + 1 >= parent.children.size()):
+				return false
+			var to := first - 1 if cmd == "move-up" else last + 2
+			return state.execute(EdStructureCommands.move_to(s, locs, EdLocator.create(parent), to), "edit")
+		"rename":
+			inspector.focus_type_field()
+			return false
+	return false
+
+
+func _refuse(message: String) -> bool:
+	state.status.emit(message, true)
+	return false
+
+
+## Insert a palette entry at the selection.
+func insert_entry(entry: Dictionary) -> bool:
+	if state.session == null or entry.is_empty():
+		return false
+	var ip := EdStructureCommands.insertion_point(state.session, state.selected_node())
+	return state.execute(EdStructureCommands.insert_new_element(state.session, EdLocator.create(ip["parent"]),
+		ip["index"], entry["name"], entry["uri"], entry["attributes"]), "palette")
+
+
+func _on_dropped(payload: Dictionary, target: Dictionary) -> void:
+	source.flush()
+	if state.session == null:
+		return
+	var parent: EdUxmlNode = target["parent"]
+	var where: String = target["where"]
+	if payload["kind"] == "palette":
+		var e: Dictionary = payload["entry"]
+		state.execute(EdStructureCommands.insert_new_element(state.session, EdLocator.create(parent), target["index"],
+			e["name"], e["uri"], e["attributes"]), where)
+	else:
+		state.execute(EdStructureCommands.move_to(state.session, payload["locs"], EdLocator.create(parent), target["index"]), where)
+
+
+func _on_items_chosen(list_name: String, indices: Array) -> void:
+	if list_name == "palette-tree" and not indices.is_empty():
+		insert_entry(palette.entry_at(indices[0]))
+
+
+func _on_shell_value(element_name: String, value: Variant) -> void:
+	match element_name:
+		"palette-search":
+			palette.set_query(String(value))
+		"snap-toggle":
+			layout.snap_enabled = bool(value)
+		"preview-toggle":
+			set_preview(bool(value))
+
+
+func _on_grid(index: int, text: String) -> void:
+	layout.grid = EdLayoutController.GRIDS[index]
+	_set_menu_text("grid-menu", text)
+
+
+## Preview mode: canvas input goes to the rendered document. Leaving it
+## renders again, so runtime state (typed text, toggles) resets to the
+## source.
+func set_preview(on: bool) -> void:
+	if canvas.preview == on:
+		return
+	canvas.set_preview(on)
+	var t := shell.get_element_model("preview-toggle")
+	if t != null and str(t.get_attribute("value")) != ("true" if on else "false"):
+		t.set_attribute("value", "true" if on else "false")
+	if on:
+		canvas.grab_focus()
+	else:
+		_queue_render()
+	_update_canvas_header()
+	state.status.emit("Preview on: the document gets the mouse and keyboard." if on else "Preview off.", false)
+
+
+func _update_canvas_header() -> void:
+	var path := state.session.entry_path if state.session != null else ""
+	shell.set_text("canvas-header", "Canvas" + ("" if path.is_empty() else " — " + path) + ("   ·   PREVIEW" if canvas.preview else ""))
+
+
+func _on_canvas_picked(id: int, additive: bool) -> void:
+	if state.session == null:
+		return
+	var t := state.session.tree()
+	var n: EdUxmlNode = t.nodes[id] if id >= 0 and id < t.nodes.size() else null
+	if additive:
+		state.toggle_node(n, "canvas")
+	else:
+		state.select_node(n, "canvas")
 
 
 func _on_window_focus() -> void:
@@ -310,7 +551,7 @@ func _on_project_opened() -> void:
 
 
 func _on_document_opened(path: String) -> void:
-	shell.set_text("canvas-header", "Canvas — " + path)
+	_update_canvas_header()
 	_show_source(path)
 	_refresh_files()
 	_queue_render()
@@ -353,6 +594,7 @@ func _render() -> void:
 
 
 func _on_rendered() -> void:
+	layout.rendered()
 	_refresh_hierarchy()
 	_refresh_diagnostics()
 	_on_selection_changed("render")
@@ -399,6 +641,8 @@ func _tree_item(n: EdUxmlNode) -> Dictionary:
 		label += "  ." + " .".join(String(cls).split(" ", false))
 	if not n.well_formed:
 		label += "  ⚠"
+	if n.parent != null and not EdElementCatalog.is_known(n.local):
+		label += "  (unknown)"
 	return {"id": n.id, "data": label, "children": n.children.map(_tree_item)}
 
 
@@ -443,9 +687,15 @@ func _on_list_selection(list_name: String, indices: Array) -> void:
 			else:
 				_show_source(f)
 		"hierarchy-tree":
-			var item := shell.get_tree_item("hierarchy-tree", indices[0])
-			if not item.is_empty():
-				state.select_id(int(item["id"]), "hierarchy")
+			var t := state.session.tree() if state.session != null else null
+			if t == null:
+				return
+			var nodes: Array = []
+			for i in indices:
+				var item := shell.get_tree_item("hierarchy-tree", i)
+				if not item.is_empty() and int(item["id"]) < t.nodes.size():
+					nodes.append(t.nodes[int(item["id"])])
+			state.select_nodes(nodes, "hierarchy")
 		"diagnostics-list":
 			var d: Dictionary = _diagnostics[indices[0]]
 			if state.workspace.has(d["file"]):
@@ -463,13 +713,14 @@ func _on_source_caret(offset: int) -> void:
 
 
 func _on_selection_changed(origin: String) -> void:
-	var n := state.selected_node()
-	canvas.selected_id = -1 if n == null else n.id
+	var nodes := state.selected_nodes()
+	var n: EdUxmlNode = nodes[0] if not nodes.is_empty() else null
+	canvas.selected_ids = nodes.map(func(x): return x.id)
 	if origin != "hierarchy":
-		_select_in_tree(n)
+		_select_in_tree(nodes)
 	if origin != "source":
 		_mark_selection_in_source(origin != "render")
-	inspector.show_selection(state.session, n, canvas.host)
+	inspector.show_selection(state.session, n, canvas.host, nodes.size())
 
 
 func _mark_selection_in_source(reveal: bool) -> void:
@@ -482,24 +733,36 @@ func _mark_selection_in_source(reveal: bool) -> void:
 	source.mark_range(n.open_start, n.open_end, reveal)
 
 
-func _select_in_tree(n: EdUxmlNode) -> void:
+func _select_in_tree(nodes: Array) -> void:
 	_syncing = true
-	if n == null:
+	if nodes.is_empty():
 		shell.set_selection("hierarchy-tree", [])
 		_syncing = false
 		return
-	var a := n.parent
-	while a != null:
-		shell.set_tree_item_expanded("hierarchy-tree", a.id, true)
-		a = a.parent
+	var want := {}
+	for n in nodes:
+		want[n.id] = true
+		var a: EdUxmlNode = n.parent
+		while a != null:
+			shell.set_tree_item_expanded("hierarchy-tree", a.id, true)
+			a = a.parent
+	var found: Array = []
+	var primary := -1
 	var i := 0
 	while true:
 		var item := shell.get_tree_item("hierarchy-tree", i)
 		if item.is_empty():
 			break
-		if int(item["id"]) == n.id:
-			shell.set_selection("hierarchy-tree", [i])
-			shell.scroll_to_item("hierarchy-tree", i)
-			break
+		if want.has(int(item["id"])):
+			if int(item["id"]) == nodes[0].id:
+				primary = i
+			else:
+				found.append(i)
 		i += 1
+	# Primary first, as the canvas and the inspector show it.
+	if primary >= 0:
+		found.push_front(primary)
+	shell.set_selection("hierarchy-tree", found)
+	if not found.is_empty():
+		shell.scroll_to_item("hierarchy-tree", found[0])
 	_syncing = false

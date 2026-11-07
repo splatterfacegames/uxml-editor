@@ -85,12 +85,44 @@ func selected_node() -> EdUxmlNode:
 	return session.resolve(selection[0])
 
 
+## Every selected element that still resolves, primary first.
+func selected_nodes() -> Array:
+	var out: Array = []
+	if session == null:
+		return out
+	for loc in selection:
+		var n := session.resolve(loc)
+		if n != null and not out.has(n):
+			out.append(n)
+	return out
+
+
 func select_node(node: EdUxmlNode, origin: String) -> void:
-	var next := [] if node == null else [EdLocator.create(node)]
+	select_nodes([] if node == null else [node], origin)
+
+
+## Select `nodes`; the first one is the primary selection.
+func select_nodes(nodes: Array, origin: String) -> void:
+	var next: Array = []
+	for n in nodes:
+		if n != null:
+			next.append(EdLocator.create(n))
 	if next == selection:
 		return
 	selection = next
 	selection_changed.emit(origin)
+
+
+## Add `node` to the selection, or remove it when it is selected.
+func toggle_node(node: EdUxmlNode, origin: String) -> void:
+	if node == null:
+		return
+	var nodes := selected_nodes()
+	if nodes.has(node):
+		nodes.erase(node)
+	else:
+		nodes.append(node)
+	select_nodes(nodes, origin)
 
 
 func select_id(id: int, origin: String) -> void:
