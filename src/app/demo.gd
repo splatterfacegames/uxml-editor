@@ -132,7 +132,9 @@ static func stage(m: EdMain, demo: String) -> void:
 		"context-menu":
 			await _frames(tree, 3)
 			var quit := _node(m, "quit-button")
-			m.open_context_menu(await _row_center(m, "hierarchy-tree", _tree_index(m, quit.id)))
+			var at: Vector2 = await _row_center(m, "hierarchy-tree", _tree_index(m, quit.id))
+			m.state.select_node(quit, "demo")
+			m.shell.show_context_menu(at, m._context_items({"position": at}))
 		"provenance":
 			_select(m, "play-button")
 			await _frames(tree, 3)

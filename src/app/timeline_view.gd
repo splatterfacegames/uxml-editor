@@ -23,6 +23,13 @@ extends Node
 ## write targets of the inspector (EdInspectorView.gesture_target,
 ## commit_choice) as one undo step per drag; when more than one target is
 ## valid and none is remembered, the picker asks at the end of the drag.
+##
+## A drag writes once, at its end. During the drag the bar follows the
+## pointer, and the run shows the new time on the canvas through a preview
+## (EdTransitionPlayer.set_preview), without a patch and without a stylesheet
+## reload. The reload of the end write waits for a pause of the gestures
+## (EdMain._on_buffers_changed): only the timing of the transitions changed,
+## and the preview shows it on the element of the run.
 ## During a run the targets come from the To state: the To state gives the
 ## transition of a state change. A `:hover` rule sets the duration of the
 ## change to `:hover`; without one, the rule without states gives it
@@ -80,6 +87,11 @@ var _shown := {}
 var _tips := {}
 ## The user set the From or the To text: a render keeps it.
 var _custom_states := false
+## The next buffer change comes from the end of a bar drag: the render
+## waits (EdMain._on_buffers_changed).
+var defer_next_render := false
+## Runs the render that waits now (set by the main window).
+var flush_render: Callable
 
 
 func attach(p_shell: UxmlDocument, p_state: EdEditorState, p_host: EdRenderHost, p_inspector: EdInspectorView, p_settings: EdSettings) -> void:
@@ -206,6 +218,8 @@ func run(from: Dictionary, to: Dictionary, autoplay: bool = false) -> void:
 
 ## End the run: the canvas shows the source and the state preview again.
 func stop() -> void:
+	if flush_render.is_valid():
+		flush_render.call()
 	var was: bool = player != null and player.armed
 	model.playing = false
 	model.time = 0.0
@@ -293,7 +307,7 @@ func _label(id: int) -> String:
 
 func _process(dt: float) -> void:
 	if not _drag.is_empty() and _drag.has("pending"):
-		_flush_bar()
+		_preview_bar()
 	if model.step(dt):
 		player.seek(model.time)
 		seeks += 1
@@ -666,6 +680,9 @@ func _hover_at(p: Vector2) -> void:
 
 
 func _press(p: Vector2, double: bool, no_snap: bool) -> void:
+	# A drag reads the computed lists: the end write of the last drag first.
+	if flush_render.is_valid():
+		flush_render.call()
 	var h := hit(p)
 	var i: int = h["track"]
 	match String(h["kind"]):
@@ -713,9 +730,12 @@ func _release() -> void:
 	var d := _drag
 	if d.get("kind", "") == "bar":
 		_finish_bar()
+		_drag = {}
 	elif d.get("kind", "") == "scrub":
+		_drag = {}
 		settled.emit()
-	_drag = {}
+	else:
+		_drag = {}
 	_redraw()
 
 
@@ -752,7 +772,7 @@ func _start_bar(i: int, part: String, p: Vector2) -> void:
 	_drag = {"kind": "bar", "track": i, "part": part, "x": p.x, "delay0": float(tr["delay"]), "duration0": float(tr["duration"]),
 		"last": float(tr["delay"]) if part == "move" else float(tr["duration"]), "prop": prop, "entry": e,
 		"id": String(g["choice"]["id"]), "first_id": String(g["choice"]["id"]), "ask": bool(g["ask"]), "choices": g["choices"],
-		"key": "timeline:%d" % _counter, "steps": 0, "value": ""}
+		"key": "timeline:%d" % _counter, "value": ""}
 
 
 ## The pseudo-states of the write targets of an edit: the To state of a
@@ -767,30 +787,56 @@ func _bar_text(sec: float) -> String:
 	return EdTransitionValues.with_entry(_drag["prop"], e["list"], (e["names"] as Array).size(), int(e["k"]), EdTransitionValues.format_time(sec))
 
 
-## Write the newest value of the drag (one write per frame).
-func _flush_bar() -> void:
-	if not _drag.has("pending"):
-		return
+## Show the newest value of the drag on the run (one preview per frame). The
+## value stays in `value` for the end write.
+func _preview_bar() -> void:
 	var sec: float = _drag["pending"]
 	_drag.erase("pending")
 	var text := _bar_text(sec)
-	var id := inspector.commit_choice(_drag["prop"], text, _drag["id"], _drag["key"], _target_states())
-	if id.is_empty():
-		_drag = {}
-		return
-	_drag["id"] = id
-	_drag["steps"] = int(_drag["steps"]) + 1
 	_drag["value"] = text
-
-
-func _finish_bar() -> void:
-	_flush_bar()
-	var d := _drag
-	if d.is_empty() or int(d.get("steps", 0)) == 0:
+	if not player.armed:
 		return
+	var decl: Dictionary = _drag.get("preview", {})
+	decl[_drag["prop"]] = text
+	_drag["preview"] = decl
+	player.set_preview(decl)
+	var t := model.time
+	var i: int = _drag["track"]
+	_arm()
+	model.time = minf(t, model.length())
+	player.seek(model.time)
+	seeks += 1
+	seeked.emit()
+	_refresh_header()
+	if i < model.tracks.size():
+		_redraw()
+
+
+## The end of a drag: one write, one undo step. A remembered or only target
+## keeps the preview: the render waits for a pause.
+func _finish_bar() -> void:
+	if _drag.has("pending"):
+		_preview_bar()
+	var d := _drag
+	if d.is_empty() or String(d.get("value", "")).is_empty():
+		_end_preview()
+		return
+	var ask: bool = d["ask"]
+	if player.armed and not ask:
+		defer_next_render = true
+	else:
+		_end_preview()
+	var id := inspector.commit_choice(d["prop"], d["value"], d["id"], d["key"], _target_states())
 	var h := state.workspace.history
+	if id.is_empty():
+		# Refused: no buffer change came.
+		defer_next_render = false
+		_end_preview()
+		_arm_again()
+		return
+	d["id"] = id
 	h.break_coalescing()
-	if not d["ask"]:
+	if not ask:
 		return
 	var key: String = d["key"]
 	var prop: String = d["prop"]
@@ -812,12 +858,46 @@ func _finish_bar() -> void:
 				state.undo())
 
 
+## Escape during a drag: nothing was written. The run shows the source again.
 func _cancel_bar() -> void:
-	var d := _drag
 	_drag = {}
-	if int(d.get("steps", 0)) > 0 and state.workspace.history.undo_key() == d["key"]:
-		state.undo()
-	state.workspace.history.break_coalescing()
+	_end_preview()
+	if player.armed:
+		_arm_again()
+	else:
+		_declared_tracks()
+	_refresh_header()
+	_redraw()
+
+
+func _end_preview() -> void:
+	if player != null and player.has_preview():
+		player.clear_preview()
+
+
+## The run again at the playhead, with the values of the source.
+func _arm_again() -> void:
+	if not player.armed:
+		return
+	var t := model.time
+	_arm()
+	model.time = minf(t, model.length())
+	player.seek(model.time)
+	seeks += 1
+	seeked.emit()
+
+
+## True while a reload would stop a gesture or playback.
+func reload_blocked() -> bool:
+	return not _drag.is_empty() or model.playing
+
+
+## The render of the source runs next: the preview goes first, so the render
+## and the source agree. Returns true when a preview showed.
+func before_render() -> bool:
+	var had: bool = player != null and player.has_preview()
+	_end_preview()
+	return had
 
 
 ## The easing picker for the timing function entry of track `i`.
@@ -920,7 +1000,9 @@ func _draw(b: Control, _rect: Rect2) -> void:
 		var et := String(tr["easing"])
 		var tw := font.get_string_size(et, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 		if r.size.x > tw + 10:
-			b.draw_string(font, Vector2(r.position.x + 4, r.end.y - 3), et, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 1, 1, 0.85))
+			# A dark band under the name: the curve never crosses the text.
+			b.draw_rect(Rect2(r.position.x + 2, r.end.y - 13, tw + 4, 12), fill.darkened(0.45))
+			b.draw_string(font, Vector2(r.position.x + 4, r.end.y - 3), et, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 1, 1, 0.92))
 		# The end handle.
 		b.draw_rect(Rect2(r.end.x - 2, r.position.y, 3, r.size.y), Color(1, 1, 1, 0.5))
 	b.draw_line(Vector2(a.position.x + LABEL_W, a.position.y), Vector2(a.position.x + LABEL_W, a.end.y), Color(0, 0, 0, 0.5), 1.0)

@@ -140,13 +140,14 @@ func _check_fits(font: Font, fs: int, text: String, width: float) -> void:
 	ok(font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x <= width + 1.0, "\"%s\" fits in %f" % [text, width])
 
 
-func test_a_label_that_changes_while_narrow_elides_at_once() -> void:
+func test_a_label_that_changes_while_narrow_elides() -> void:
 	var m := await editor()
 	m.shell.set_split_dimension("right-split", 240.0)
 	await frames(4)
 	await _select(m, "play-button")
 	m.inspector.show_property("background-color")
 	m.inspector.flush()
+	await frames(2)
 	var doc := m.inspector.doc
 	var c := doc.get_native("prov-0")
 	var shown := String(c.get("text"))
@@ -154,6 +155,7 @@ func test_a_label_that_changes_while_narrow_elides_at_once() -> void:
 	ok(shown.ends_with("...") or shown.ends_with("…"), shown)
 	m.inspector.show_property("min-width")
 	m.inspector.flush()
+	await frames(2)
 	ok(EdUi.full_text(doc, "prov-0").contains("Menu.uss:13"), "the new text: " + EdUi.full_text(doc, "prov-0"))
 	ok(String(c.get("text")) != shown, "the control shows the new text")
 
@@ -163,11 +165,13 @@ func test_window_labels_elide() -> void:
 	await frames()
 	var long_text := "A long status text ".repeat(40)
 	EdUi.set_label(m.shell, "status-label", long_text)
+	await frames(2)
 	var c := m.shell.get_native("status-label")
 	ok(String(c.get("text")).length() < long_text.length(), "elided")
 	eq(c.tooltip_text, long_text, "the tooltip")
 	eq(EdUi.full_text(m.shell, "status-label"), long_text)
 	EdUi.set_label(m.shell, "status-label", "Short")
+	await frames(2)
 	eq(String(c.get("text")), "Short")
 	ok(c.tooltip_text != long_text, "the tooltip goes away")
 
@@ -176,9 +180,12 @@ func test_window_labels_elide() -> void:
 # Classes section
 # ---------------------------------------------------------------------------
 
+## The shown height of the Classes section: down to the Attributes section,
+## with the `translate` of the sections (the unused rows stay in the layout).
 func _section_height(m: EdMain) -> float:
 	await frames(3)
-	return m.inspector.doc.get_element("class-section").size.y
+	var d := m.inspector.doc
+	return d.get_element_rect(d.get_element_model("attr-section")).position.y - d.get_element_rect(d.get_element_model("class-section")).position.y
 
 
 func test_the_classes_section_has_the_height_of_its_content() -> void:
@@ -201,6 +208,42 @@ func test_the_classes_section_has_the_height_of_its_content() -> void:
 	var six: float = await _section_height(m)
 	ok(absf(six - (none + 6 * (one - none))) < 1.5, "six rows: %f" % six)
 	ok(String(m.inspector.doc.get_native("class-name-5").get("text")) == ".e", "the last class")
+	# The add row follows the last row in use, and a row that is not in use
+	# takes no input.
+	await _select(m, "menu-title")
+	await frames(3)
+	var d := m.inspector.doc
+	var add := d.get_element_rect(d.get_element_model("class-add-row"))
+	var top := d.get_element_rect(d.get_element_model("class-section"))
+	ok(add.position.y - top.position.y < 40.0, "the add row moves up: %f" % (add.position.y - top.position.y))
+	ok(not d.get_element("block-class-0").is_visible_in_tree(), "the unused rows are invisible")
+	var line := d.get_native("new-class") as LineEdit
+	var at := line.get_global_rect().get_center()
+	var hit := d.element_at(d.get_global_transform().affine_inverse() * at)
+	ok(hit != null and hit.get_attribute("name") != "block-class-0", "the moved row gets the mouse")
+	# A closed section moves nothing.
+	var lay: int = d.layout_count
+	await _select(m, "quit-button")
+	await frames(3)
+	eq(d.layout_count, lay, "a change of the number of classes needs no layout")
+
+
+func test_a_closed_section_does_not_move_what_follows() -> void:
+	var m := await editor()
+	await _select(m, "menu-title")
+	await frames(3)
+	var d := m.inspector.doc
+	var open_at := d.get_element_rect(d.get_element_model("attr-section")).position.y
+	# A click on the header of the section.
+	var head := d.get_element_rect(d.get_element_model("class-section")).position + Vector2(12, 9)
+	var at := d.get_global_transform() * head
+	mouse_button(m, at, true)
+	mouse_button(m, at, false)
+	await frames(3)
+	eq(str(d.get_element_model("class-section").get_attribute("value")), "false", "the section closed")
+	var closed_at := d.get_element_rect(d.get_element_model("attr-section")).position.y
+	ok(closed_at <= open_at + 1.0, "closed: %f, open: %f" % [closed_at, open_at])
+	eq(String(d.get_element_model("below-classes").get_attribute("style")), "", "no shift")
 
 
 # ---------------------------------------------------------------------------

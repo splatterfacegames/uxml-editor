@@ -202,7 +202,7 @@ func test_class_editor_lists_rules_and_edits_classes() -> void:
 	eq(cls.map(func(c): return c["name"]), ["menu-button", "primary"])
 	eq(cls[0]["rules"].map(func(r): return r["selector"]), [".menu-button.primary", ".menu-button"])
 	ok(cls[0]["rules"].all(func(r): return r["matches"]), "both rules apply")
-	var txt := String((m.inspector.doc.get_native("class-rules-0") as Button).text)
+	var txt := EdUi.full_text(m.inspector.doc, "class-rules-0")
 	ok(txt.contains("✓ .menu-button.primary  Menu.uss:7"), txt)
 	m.inspector._on_button("class-rules-1")
 	await frames()
@@ -266,14 +266,21 @@ func test_state_preview_forces_states_and_edits_state_rules() -> void:
 func test_attribute_rows_have_no_gap_and_catalog_hints() -> void:
 	var m := await editor()
 	await _select(m, "menu-title")
-	var block := m.inspector.doc.get_element_model("block-attr-0")
-	ok(String(block.get_attribute("class")).contains("hidden"), "no spare rows without extra attributes")
+	await frames(3)
+	var d := m.inspector.doc
+	var fixed := EdInspectorView.COMMON_ATTRIBUTES.size()
+	ok(not d.get_element("row-attr-%d" % fixed).is_visible_in_tree(), "a spare row is invisible")
+	var last := d.get_element_rect(d.get_element_model("row-attr-%d" % (fixed - 1)))
+	var add := d.get_element_rect(d.get_element_model("attr-add-row"))
+	ok(add.position.y - last.end.y < 10.0, "no gap above the add row: %f" % (add.position.y - last.end.y))
 	var i := EdInspectorView.COMMON_ATTRIBUTES.find("picking-mode")
 	eq((m.inspector.doc.get_native("attr-%d" % i) as LineEdit).placeholder_text, "Position | Ignore", "enum choices from the catalog")
 	m.state.execute(EdUxmlCommands.set_attribute(m.state.session, EdLocator.create(node_named(m, "play-button")), "data-note", "x"), "test")
 	await frames()
 	await _select(m, "play-button")
-	ok(not String(m.inspector.doc.get_element_model("block-attr-0").get_attribute("class")).contains("hidden"), "a block in use is shown")
+	await frames(3)
+	ok(d.get_element("row-attr-%d" % fixed).is_visible_in_tree(), "a row in use is shown")
+	ok(d.get_element_rect(d.get_element_model("attr-add-row")).position.y > add.position.y, "the add row moves down")
 
 
 # ---------------------------------------------------------------------------

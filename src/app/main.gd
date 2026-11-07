@@ -41,15 +41,18 @@ const EDIT_MENU := [
 	["Rename element type   F2", "rename"],
 ]
 ## Hierarchy context menu: the Edit commands without the rename shortcut
-## text; [label, command].
+## text; [label, command]. "-" is a separator.
 const CONTEXT_MENU := [
 	["Cut", "cut"], ["Copy", "copy"], ["Paste", "paste"], ["Duplicate", "duplicate"], ["Delete", "delete"],
-	["Wrap in VisualElement", "wrap"], ["Unwrap", "unwrap"], ["Move up", "move-up"], ["Move down", "move-down"],
-	["Rename element type", "rename"],
+	["-", ""], ["Wrap in VisualElement", "wrap"], ["Unwrap", "unwrap"],
+	["-", ""], ["Move up", "move-up"], ["Move down", "move-down"],
+	["-", ""], ["Rename element type", "rename"],
 ]
 ## The resizable panes (TwoPaneSplitView). Their sizes are per-user
 ## settings (EdSettings, section "layout").
 const SPLITS := ["main-split", "left-split", "hier-split", "right-split", "center-split", "lower-split", "source-split"]
+## Seconds of pause before the render of a timeline bar edit.
+const RELOAD_PAUSE := 0.4
 const SEVERITY_MENU := [["All severities", ""], ["Errors", "error"], ["Warnings", "warning"], ["Info", "info"]]
 const SOURCE_MENU := [["All sources", ""], ["godot-uxml (import)", "godot-uxml"], ["Editor", "editor"]]
 
@@ -78,6 +81,8 @@ var diag_filter := {"severity": "", "file": "", "source": ""}
 var _render_diags: Dictionary = {}
 var _diag_files: Array = []
 var tabs: EdTabBar
+## The render of the end of a timeline bar drag waits for this timer.
+var reload_timer: Timer
 ## Disk check timer (external changes).
 var watch_timer: Timer
 ## --watch-interval=0: no disk check on a timer.
@@ -86,9 +91,6 @@ var _watch_off := false
 var _asks: Array = []
 var _asking: ConfirmationDialog = null
 var _asking_tag := ""
-## The open hierarchy context menu.
-var context_menu: UxmlPopupMenu = null
-var _menu_anchor: Control = null
 var _files_shown: Array = []
 var _dialog: FileDialog
 var _confirm: ConfirmationDialog
@@ -140,6 +142,8 @@ func _ready() -> void:
 	shell.selection_changed.connect(_on_list_selection)
 	shell.items_chosen.connect(_on_items_chosen)
 	shell.item_expanded_changed.connect(func(_list, _id, _on): _tree_rows.clear())
+	shell.menu_chosen.connect(func(i): run_command(CONTEXT_MENU[i][1]))
+	shell.set_context_menu(shell.get_element_model("hierarchy-tree"), _context_items)
 	shell.value_changed.connect(_on_shell_value)
 	shell.set_menu_items("edit-menu", EDIT_MENU.map(func(e): return e[0]), func(i, _t): run_command(EDIT_MENU[i][1]))
 	shell.set_menu_items("grid-menu", EdLayoutController.GRIDS.map(func(g): return "No grid" if g <= 1 else "Grid %d px" % g), _on_grid)
@@ -157,6 +161,7 @@ func _ready() -> void:
 	timeline.select_requested.connect(func(id): state.select_id(id, "timeline"))
 	timeline.seeked.connect(canvas.queue_redraw)
 	timeline.settled.connect(inspector.refresh)
+	timeline.flush_render = flush_waiting_render
 	inspector.states_toggled.connect(timeline.states_toggled)
 	inspector.classes_toggled.connect(timeline.classes_toggled)
 	layout = EdLayoutController.new(state, canvas)
@@ -207,6 +212,11 @@ func _ready() -> void:
 	add_child(_dialog)
 	_confirm = ConfirmationDialog.new()
 	add_child(_confirm)
+	reload_timer = Timer.new()
+	reload_timer.one_shot = true
+	reload_timer.wait_time = RELOAD_PAUSE
+	reload_timer.timeout.connect(_on_reload_timer)
+	add_child(reload_timer)
 	watch_timer = Timer.new()
 	watch_timer.wait_time = 2.0
 	watch_timer.timeout.connect(_on_watch_timer)
@@ -506,12 +516,6 @@ func _input(ev: InputEvent) -> void:
 	var mb := ev as InputEventMouseButton
 	if mb != null and not mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
 		save_splits.call_deferred()
-	if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT and not canvas.preview:
-		var tree_c := shell.get_element("hierarchy-tree")
-		if tree_c != null and tree_c.get_global_rect().has_point(mb.global_position):
-			open_context_menu(mb.global_position)
-			get_viewport().set_input_as_handled()
-			return
 	# Alt+Up and Alt+Down move the selection before a list takes them as
 	# plain arrow keys.
 	var k := ev as InputEventKey
@@ -627,36 +631,17 @@ func run_command(cmd: String) -> bool:
 	return false
 
 
-## The hierarchy context menu at global point `at`: the row under the
-## point joins the selection first (as in Unity), then the Edit commands.
-## The menu is a godot-uxml popup (UxmlPopupMenu) under an anchor Control
-## at the point.
-func open_context_menu(at: Vector2) -> void:
-	_close_context_menu()
-	var id := _tree_row_at(at)
-	if id >= 0 and state.session != null:
-		var t := state.session.tree()
-		if id < t.nodes.size():
-			var n: EdUxmlNode = t.nodes[id]
-			if not state.selected_nodes().has(n):
-				state.select_node(n, "context-menu")
-	_menu_anchor = Control.new()
-	_menu_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_menu_anchor)
-	_menu_anchor.global_position = at
-	_menu_anchor.size = Vector2(250, 0)
-	context_menu = UxmlPopupMenu.open(_menu_anchor, PackedStringArray(CONTEXT_MENU.map(func(e): return e[0])), -1, shell.theme_path, shell)
-	context_menu.chosen.connect(func(i): run_command(CONTEXT_MENU[i][1]))
-	context_menu.popup_hide.connect(_close_context_menu, CONNECT_DEFERRED)
-
-
-func _close_context_menu() -> void:
-	if context_menu != null and is_instance_valid(context_menu):
-		context_menu.queue_free()
-	context_menu = null
-	if _menu_anchor != null and is_instance_valid(_menu_anchor):
-		_menu_anchor.queue_free()
-	_menu_anchor = null
+## The items of the hierarchy context menu (the ContextualMenuManipulator
+## of godot-uxml, request R16): the row under the point joins the selection
+## first (as in Unity), then the Edit commands.
+func _context_items(a: Dictionary) -> Array:
+	if canvas.preview or state.session == null:
+		return []
+	var id := _tree_row_at(a["position"])
+	var t := state.session.tree()
+	if id >= 0 and id < t.nodes.size() and not state.selected_nodes().has(t.nodes[id]):
+		state.select_node(t.nodes[id], "context-menu")
+	return CONTEXT_MENU.map(func(e): return e[0])
 
 
 ## The hierarchy item id of the row under global point `at`, or -1
@@ -948,13 +933,36 @@ func _queue_render(incremental: bool = false) -> void:
 	_render.call_deferred()
 
 
+## Run the render that waits for the pause after a timeline bar edit, now.
+func flush_waiting_render() -> void:
+	if reload_timer == null or reload_timer.is_stopped():
+		return
+	reload_timer.stop()
+	_render_patch = not _render_queued or _render_patch
+	_render()
+
+
+func _on_reload_timer() -> void:
+	if timeline.reload_blocked():
+		reload_timer.start()
+		return
+	_queue_render(state.session != null and not canvas.preview)
+
+
 func _render() -> void:
 	_render_queued = false
+	reload_timer.stop()
+	var had_preview := timeline.before_render()
+	var runs := canvas.host.renders + canvas.host.patches
 	if state.session == null or not state.has_project():
 		_refresh_hierarchy()
 		_refresh_diagnostics()
 		return
 	if _render_patch and canvas.host.update(state.workspace, state.session.entry_path):
+		# An undo in the pause after a bar edit: the render has the text
+		# already, and the run shows the preview no more.
+		if had_preview and canvas.host.renders + canvas.host.patches == runs:
+			timeline.rendered()
 		return
 	canvas.host.render(state.workspace, state.session.entry_path, state.store.root)
 
@@ -976,6 +984,11 @@ func _on_buffers_changed(paths: Array, _cause: String, tx: EdTransaction) -> voi
 		source.reload_from_buffer()
 	elif paths.has(source_path):
 		source.reload_from_buffer()
+	# The end of a bar drag: the preview shows the edit, the render waits.
+	if timeline.defer_next_render:
+		timeline.defer_next_render = false
+		reload_timer.start()
+		return
 	_queue_render(state.session != null and not canvas.preview)
 
 

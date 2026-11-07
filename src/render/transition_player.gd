@@ -18,6 +18,12 @@ extends RefCounted
 ## set_forced_states. disarm() puts back the classes of the source text
 ## and the forced states of the state preview, without transitions, and
 ## gives the frame clock back to godot-uxml.
+##
+## set_preview() shows edited `transition-*` values on the element of the
+## run before they are written: declarations at the end of the `style`
+## attribute of the godot-uxml model. A stylesheet reload costs a restyle of
+## the whole document; a change of one `style` attribute costs a restyle of
+## one element. The source text does not change.
 
 var host: EdRenderHost
 var node_id := -1
@@ -32,6 +38,11 @@ var source_classes: Array = []
 var _el: UxmlElement = null
 ## Number of arms (tests and the benchmark).
 var arms := 0
+## property -> value of the preview declarations.
+var _preview: Dictionary = {}
+## The `style` attribute of the element before the preview ({} when no
+## preview shows).
+var _style_saved: Dictionary = {}
 
 
 func _init(h: EdRenderHost) -> void:
@@ -51,6 +62,7 @@ func arm(id: int, from: Dictionary, to: Dictionary) -> Array:
 		disarm()
 	if not armed:
 		_el = el
+		_style_saved = {}
 	node_id = id
 	from_state = from.duplicate(true)
 	to_state = to.duplicate(true)
@@ -58,9 +70,51 @@ func arm(id: int, from: Dictionary, to: Dictionary) -> Array:
 	arms += 1
 	doc.transitions_manual = true
 	_apply(el, from)
+	_show_preview(el)
 	_settle(doc)
 	_apply(el, to)
 	return doc.get_transitions()
+
+
+## Show `declarations` (property -> value) on the element of the run. The
+## next arm() starts the transitions with them.
+func set_preview(declarations: Dictionary) -> void:
+	_preview = declarations.duplicate()
+
+
+func has_preview() -> bool:
+	return not _preview.is_empty()
+
+
+## The source value of the `style` attribute again; the next arm() or the
+## next restyle shows it.
+func clear_preview() -> void:
+	_preview = {}
+	if _el != null and not _style_saved.is_empty():
+		_restore_style(_el)
+
+
+func _show_preview(el: UxmlElement) -> void:
+	if _preview.is_empty():
+		return
+	if _style_saved.is_empty():
+		_style_saved = {"value": el.get_attribute("style")}
+	var base := String(_style_saved["value"]) if _style_saved["value"] != null else ""
+	var text := base.strip_edges()
+	if not text.is_empty() and not text.ends_with(";"):
+		text += ";"
+	for prop in _preview:
+		text += " %s: %s;" % [prop, _preview[prop]]
+	el.set_attribute("style", text.strip_edges())
+
+
+func _restore_style(el: UxmlElement) -> void:
+	var was = _style_saved["value"]
+	_style_saved = {}
+	if was == null:
+		el.remove_attribute("style")
+	else:
+		el.set_attribute("style", String(was))
 
 
 ## The running transitions of the armed run.
@@ -82,8 +136,11 @@ func disarm() -> void:
 	if not armed:
 		return
 	armed = false
+	_preview = {}
 	var doc := host.doc
 	if doc != null and _el != null and is_instance_valid(doc) and host.element_for_node.get(node_id) == _el:
+		if not _style_saved.is_empty():
+			_restore_style(_el)
 		_apply(_el, {"classes": source_classes, "states": host.forced_of(node_id)})
 		_settle(doc)
 	if doc != null and is_instance_valid(doc):
@@ -100,6 +157,7 @@ func rendered() -> void:
 	var el = host.element_for_node.get(node_id)
 	if el != _el:
 		_el = el
+		_style_saved = {}
 		if el == null:
 			armed = false
 			node_id = -1

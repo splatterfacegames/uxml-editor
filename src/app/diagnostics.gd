@@ -6,26 +6,12 @@ extends RefCounted
 ##
 ## Entry: {severity: "error"|"warning"|"info", source: "godot-uxml"|"editor",
 ##         file, start, end, line, column, kind, message}
-## `start`/`end` are String offsets in the file (-1: no range). godot-uxml
-## gives a start offset only (request R11); range_end() finds the end of
-## the token or tag at the start.
+## `start`/`end` are String offsets in the file (-1: no range). Each
+## godot-uxml diagnostic has a severity and a range (request R11); range_end()
+## finds the end of the token or tag for a diagnostic without a range.
 
 const SEVERITIES := ["error", "warning", "info"]
 const SOURCES := ["godot-uxml", "editor"]
-
-## godot-uxml kinds that stop part of the document from loading.
-const ERROR_KINDS := ["malformed", "import-unresolved", "import-cycle", "missing-file", "path-outside-root",
-	"malformed-reference", "template-not-declared", "template-cycle", "template-depth-exceeded"]
-const INFO_KINDS := ["version-dependent"]
-
-
-static func severity_of(kind: String) -> String:
-	if ERROR_KINDS.has(kind):
-		return "error"
-	if INFO_KINDS.has(kind):
-		return "info"
-	return "warning"
-
 
 ## Every entry for the open files. `render_diags`: document path -> the
 ## godot-uxml diagnostics of its last render. `root`: the project root, to
@@ -59,10 +45,14 @@ static func collect(state: EdEditorState, render_diags: Dictionary, root: String
 			seen[key] = true
 			var start := int(d.get("offset", -1))
 			var text := ws.text(f) if ws.has(f) else ""
-			var e := _entry(severity_of(String(d.get("kind", ""))), "godot-uxml", f, start, -1, String(d.get("kind", "")), String(d.get("message", "")), text)
+			var kind := String(d.get("kind", ""))
+			var e := _entry(String(d.get("severity", UxmlDiagnostic.severity_of(kind))), "godot-uxml", f, start, -1, kind, String(d.get("message", "")), text)
 			e["line"] = int(d.get("line", e["line"]))
 			e["column"] = int(d.get("column", e["column"]))
-			if ws.has(f):
+			var end := int(d.get("end_offset", start))
+			if end > start:
+				e["end"] = end
+			elif ws.has(f):
 				e["end"] = range_end(ws, f, start)
 			out.append(e)
 	# godot-uxml reports an unknown element of a rendered document itself

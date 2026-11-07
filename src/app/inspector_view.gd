@@ -51,11 +51,9 @@ const COMMON_STYLES := [
 ## The states of the state preview (godot-uxml set_forced_states, R6).
 const STATES := ["hover", "active", "focus", "checked", "selected", "disabled"]
 ## Extra rows (attributes and declarations outside the common lists) come
-## in blocks of this size. A block that is not in use is not displayed.
+## in blocks of this size.
 const POOL_STEP := 2
-## Class rows: one block per class, displayed only when in use, so the
-## Classes section has the height of its content. The skeleton holds at
-## least this many.
+## Class rows: one block per class. The skeleton holds at least this many.
 const CLASS_MIN := 2
 ## Rows of the declaration list.
 const PROV_ROWS := 8
@@ -97,10 +95,11 @@ var _sticky_key := ""
 ## Lists project assets: (extensions: Array) -> Array of project paths.
 var asset_lister: Callable
 var _color_popup: PopupPanel = null
-var _anchor: Control = null
 var _coalesce := 0
 ## The timing function that the curve shows.
 var _easing_shown := ""
+## Rows that are not in use: {class, attr, style} (_compact).
+var _unused: Dictionary = {}
 var easing_picker: EdEasingPicker = null
 ## field -> the placeholder before elision.
 var _placeholder_full: Dictionary = {}
@@ -361,8 +360,8 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	out.append("<ui:ScrollView name=\"scroll\" class=\"inspector\">")
 	out.append("<ui:Label name=\"empty\" class=\"empty\" text=\"%s\" />" % _x("Select an element in the canvas or the hierarchy."))
 	out.append("<ui:VisualElement name=\"content\" class=\"invisible\">")
-	out.append("<ui:Label name=\"title\" class=\"title\" text=\" \" />")
-	out.append("<ui:Label name=\"subtitle\" class=\"subtitle\" text=\" \" />")
+	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"title\" class=\"title\" text=\" \" /></ui:VisualElement>")
+	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"subtitle\" class=\"subtitle\" text=\" \" /></ui:VisualElement>")
 	out.append("<ui:TextField name=\"element-type\" label=\"Element\" value=\"\" is-delayed=\"true\" class=\"field type-field\" tooltip=\"%s\" />" % _x("The element type (F2). Enter renames the open and close tags."))
 	out.append("<ui:HelpBox name=\"warn-unknown\" class=\"hidden\" message-type=\"Warning\" text=\"%s\" />" % _x("godot-uxml does not know this element. The element stays in the document and renders as a plain box."))
 	out.append("<ui:HelpBox name=\"warn-inexact\" class=\"hidden\" message-type=\"Warning\" text=\"%s\" />" % _x("This file does not decode to its exact bytes. The editor shows it but does not change it."))
@@ -375,22 +374,24 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	# Classes.
 	out.append("<ui:Foldout name=\"class-section\" text=\"Classes\" value=\"true\" class=\"section\">")
 	for i in class_pool:
-		out.append("<ui:VisualElement name=\"block-class-%d\" class=\"block hidden\">" % i)
+		out.append("<ui:VisualElement name=\"block-class-%d\" class=\"block invisible\">" % i)
 		out.append("<ui:VisualElement name=\"row-class-%d\" class=\"row\">" % i)
 		out.append("<ui:Label name=\"class-name-%d\" class=\"row-label class-name\" text=\" \" />" % i)
 		out.append("<ui:Button name=\"class-rules-%d\" class=\"link class-rules\" text=\" \" tooltip=\"%s\" />" % [i, _x("The rules that name the class (✓: applies now). Click to show the first rule.")])
 		out.append("<ui:Button name=\"remove-class-%d\" class=\"remove\" text=\"×\" tooltip=\"Remove the class\" />" % i)
 		out.append("</ui:VisualElement>")
 		out.append("</ui:VisualElement>")
-	out.append("<ui:VisualElement class=\"add-row\">")
+	out.append("<ui:VisualElement name=\"class-add-row\" class=\"add-row\">")
 	out.append("<ui:TextField name=\"new-class\" class=\"add-value\" placeholder-text=\"add a class\" />")
 	out.append("<ui:Button name=\"add-class\" class=\"add-button\" text=\"Add\" />")
 	out.append("</ui:VisualElement>")
 	out.append("</ui:Foldout>")
-	# Attributes.
+	# Attributes. Each below-* wrapper holds what follows a list of rows:
+	# the wrapper moves up over the rows that are not in use (_compact).
+	out.append("<ui:VisualElement name=\"below-classes\">")
 	out.append("<ui:Foldout name=\"attr-section\" text=\"Attributes\" value=\"true\" class=\"section\">")
 	_rows_xml(out, "attr", COMMON_ATTRIBUTES.size(), attr_pool)
-	out.append("<ui:VisualElement class=\"add-row\">")
+	out.append("<ui:VisualElement name=\"attr-add-row\" class=\"add-row\">")
 	out.append("<ui:Button name=\"pick-attr\" class=\"helper\" text=\"▾\" tooltip=\"%s\" />" % _x("The attributes of this element (godot-uxml catalog)."))
 	out.append("<ui:TextField name=\"new-attr-name\" class=\"add-name\" placeholder-text=\"attribute\" />")
 	out.append("<ui:TextField name=\"new-attr-value\" class=\"add-value\" placeholder-text=\"value\" />")
@@ -398,27 +399,30 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 	out.append("</ui:VisualElement>")
 	out.append("</ui:Foldout>")
 	# Style.
+	out.append("<ui:VisualElement name=\"below-attrs\">")
 	out.append("<ui:Foldout name=\"style-section\" text=\"Style\" value=\"true\" class=\"section\">")
 	out.append("<ui:HelpBox name=\"warn-style\" class=\"hidden\" message-type=\"Warning\" text=\"%s\" />" % _x("The style attribute occurs more than once. Edit it in the source view."))
 	out.append("<ui:Label class=\"hint\" text=\"%s\" />" % _x("Unset properties show the computed value. A field with the focus lists its declarations below."))
 	_rows_xml(out, "style", COMMON_STYLES.size(), style_pool)
-	out.append("<ui:VisualElement class=\"add-row\">")
+	out.append("<ui:VisualElement name=\"style-add-row\" class=\"add-row\">")
 	out.append("<ui:TextField name=\"new-style-name\" class=\"add-name\" placeholder-text=\"property\" />")
 	out.append("<ui:TextField name=\"new-style-value\" class=\"add-value\" placeholder-text=\"value\" />")
 	out.append("<ui:Button name=\"add-style\" class=\"add-button\" text=\"Add\" />")
 	out.append("</ui:VisualElement>")
 	out.append("</ui:Foldout>")
 	# Declarations of the focused property (provenance).
+	out.append("<ui:VisualElement name=\"below-styles\">")
 	out.append("<ui:Foldout name=\"prov-section\" text=\"Declarations\" value=\"true\" class=\"section\">")
-	out.append("<ui:Label name=\"prov-title\" class=\"readout\" text=\" \" />")
+	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"prov-title\" class=\"readout\" text=\" \" /></ui:VisualElement>")
 	for i in PROV_ROWS:
-		out.append("<ui:Button name=\"prov-%d\" class=\"link prov invisible\" text=\" \" tooltip=\"%s\" />" % [i, _x("Click to show the declaration in the source view.")])
-	out.append("<ui:Label name=\"prov-targets\" class=\"readout targets\" text=\" \" />")
+		out.append("<ui:VisualElement class=\"line\"><ui:Button name=\"prov-%d\" class=\"link prov invisible\" text=\" \" tooltip=\"%s\" /></ui:VisualElement>" % [i, _x("Click to show the declaration in the source view.")])
+	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"prov-targets\" class=\"readout targets\" text=\" \" /></ui:VisualElement>")
 	out.append("</ui:Foldout>")
 	out.append("<ui:Foldout name=\"layout-section\" text=\"Layout\" value=\"true\" class=\"section\">")
-	out.append("<ui:Label name=\"layout-readout\" class=\"readout\" text=\" \" />")
+	out.append("<ui:VisualElement class=\"line\"><ui:Label name=\"layout-readout\" class=\"readout\" text=\" \" /></ui:VisualElement>")
 	out.append("</ui:Foldout>")
-	out.append("</ui:VisualElement>")
+	# below-styles, below-attrs, below-classes, content.
+	out.append("</ui:VisualElement></ui:VisualElement></ui:VisualElement></ui:VisualElement>")
 	out.append("</ui:ScrollView></ui:UXML>")
 	var offset := Vector2.ZERO
 	if doc.get_document_model() != null and doc.get_element("scroll") != null:
@@ -441,12 +445,12 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 			c.focus_entered.connect(_on_style_focus.bind("style-%d" % i))
 
 
-## The fixed rows, then the extra rows in blocks; a block in use is shown.
+## The fixed rows, then the extra rows in blocks.
 func _rows_xml(out: PackedStringArray, kind: String, fixed: int, extra: int) -> void:
 	for i in fixed:
 		_row(out, kind, i, "row")
 	for b in extra / POOL_STEP:
-		out.append("<ui:VisualElement name=\"block-%s-%d\" class=\"block hidden\">" % [kind, b])
+		out.append("<ui:VisualElement name=\"block-%s-%d\" class=\"block\">" % [kind, b])
 		for j in POOL_STEP:
 			_row(out, kind, fixed + b * POOL_STEP + j, "row invisible")
 		out.append("</ui:VisualElement>")
@@ -528,6 +532,10 @@ func _apply(v: Dictionary) -> void:
 		_class_rows(v["classes"])
 		_rows("attr", v["attrs"], COMMON_ATTRIBUTES.size(), _attr_pool)
 		_rows("style", v["styles"], COMMON_STYLES.size(), _style_pool)
+		_unused = {"class": _class_pool - (v["classes"] as Array).size(),
+			"attr": COMMON_ATTRIBUTES.size() + _attr_pool - (v["attrs"] as Array).size(),
+			"style": COMMON_STYLES.size() + _style_pool - (v["styles"] as Array).size()}
+		_compact()
 		for i in COMMON_STYLES.size():
 			var prop: String = COMMON_STYLES[i]
 			var h := helper_kind(prop)
@@ -548,14 +556,35 @@ func _apply(v: Dictionary) -> void:
 	_applying = false
 
 
-## The class rows: one block per class, displayed only when in use, so the
-## section has the height of its content. A change of the number of
-## classes costs one layout of the inspector (request R15); a selection
-## with as many classes as the one before costs none. Without classes,
-## the add field says so.
+## The sections have the height of their rows without a layout. Every row of
+## a pool stays in the layout, and a row that is not in use is invisible.
+## What follows the rows moves up over them with `translate`, a paint-only
+## property (a `display` change lays out the whole inspector: about 7 ms
+## native, 60 ms GDScript, request R15). A row is of one height, from the
+## layout. A closed section moves nothing.
+func _compact() -> void:
+	_shift("class-add-row", "below-classes", "class-section", "block-class-0", "class")
+	_shift("attr-add-row", "below-attrs", "attr-section", "row-attr-%d" % COMMON_ATTRIBUTES.size(), "attr")
+	_shift("style-add-row", "below-styles", "style-section", "row-style-%d" % COMMON_STYLES.size(), "style")
+
+
+func _shift(add_row: String, below: String, section: String, row: String, kind: String) -> void:
+	var c := doc.get_element(row)
+	var open := str(doc.get_element_model(section).get_attribute("value")) != "false"
+	var by := -int(_unused.get(kind, 0)) * (c.size.y if c != null else 0.0) if open else 0.0
+	var st := "translate: 0px %dpx;" % int(by) if by != 0.0 else ""
+	for el_name in [add_row, below]:
+		var w: Dictionary = _written.get(el_name, {})
+		if w.get("style", "") != st:
+			w["style"] = st
+			_written[el_name] = w
+			doc.get_element_model(el_name).set_attribute("style", st)
+
+
+## The class rows. Without classes, the add field says so.
 func _class_rows(rows: Array) -> void:
 	for i in _class_pool:
-		_hide("block-class-%d" % i, "block", i >= rows.size())
+		_hide("block-class-%d" % i, "block", false, "invisible" if i >= rows.size() else "")
 	_value("new-class", _text_of("new-class"), "add a class (none yet)" if rows.is_empty() else "add a class")
 	for i in _class_pool:
 		if i >= rows.size():
@@ -600,9 +629,6 @@ func _provenance_rows(rows: Array, choices: Array) -> void:
 
 
 func _rows(kind: String, rows: Array, fixed: int, extra: int) -> void:
-	var blocks := int(ceil(float(rows.size() - fixed) / POOL_STEP))
-	for b in extra / POOL_STEP:
-		_hide("block-%s-%d" % [kind, b], "block", b >= blocks)
 	for i in fixed + extra:
 		var field := "%s-%d" % [kind, i]
 		var used: bool = i < rows.size()
@@ -693,8 +719,7 @@ func _silent(el_name: String, attr: String, value: String) -> void:
 
 
 ## A label or button text. The labels that change per selection have a
-## fixed size (inspector.uss), so EdUi.set_label() needs no restyle and no
-## layout.
+## fixed size (inspector.uss), so godot-uxml needs no layout (request R15).
 func _text(el_name: String, text: String) -> void:
 	var w: Dictionary = _written.get(el_name, {})
 	if w.get("text") == text:
@@ -820,9 +845,7 @@ func _with_target(property: String, removal: bool, anchor: Control, then: Callab
 func _open_picker(property: String, cs: Array, anchor: Control, then: Callable) -> void:
 	_close_picker()
 	pending = {"property": property, "choices": cs, "then": then}
-	var labels := PackedStringArray(cs.map(func(c): return String(c["label"])))
-	labels.append("Cancel")
-	picker = UxmlPopupMenu.open(_popup_anchor(anchor), labels, -1, doc.theme_path, doc)
+	picker = doc.show_context_menu(_menu_point(anchor), _question_items(cs))
 	picker.chosen.connect(choose)
 	picker.popup_hide.connect(_on_picker_hidden, CONNECT_DEFERRED)
 
@@ -843,27 +866,25 @@ func _cancelled(p: Dictionary) -> void:
 
 
 func _close_picker() -> void:
-	if picker != null and is_instance_valid(picker):
-		picker.queue_free()
 	picker = null
-	if _anchor != null and is_instance_valid(_anchor):
-		_anchor.queue_free()
-	_anchor = null
+	doc.close_context_menu()
 
 
-## A plain Control under `near` (a field or a button) as wide as the
-## inspector: UxmlPopupMenu takes the width of its anchor, and a field is
-## too narrow for the target labels.
-func _popup_anchor(near: Control) -> Control:
-	_anchor = Control.new()
-	_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_anchor)
-	var y := 40.0
+## The items of a target question: the targets, a separator and Cancel. An
+## index past the targets cancels.
+static func _question_items(cs: Array) -> Array:
+	var items: Array = cs.map(func(c): return String(c["label"]))
+	items.append_array(["-", "Cancel"])
+	return items
+
+
+## The global point of a menu under `near` (a field or a button), at the
+## left edge of the inspector: the target labels are wide.
+func _menu_point(near: Control) -> Vector2:
+	var at := get_global_rect().position + Vector2(8, 40)
 	if near != null and near.is_inside_tree():
-		y = near.get_global_rect().position.y - get_global_rect().position.y
-	_anchor.position = Vector2(8, y)
-	_anchor.size = Vector2(maxf(size.x - 24, 120), 18)
-	return _anchor
+		at.y = near.get_global_rect().end.y
+	return at
 
 
 ## The labels of the open target question ([] when none; tests).
@@ -1018,7 +1039,9 @@ func color_changed(property: String, c: Color, coalesce: String = "") -> void:
 func _menu(anchor: Control, items: Array, then: Callable) -> void:
 	_close_picker()
 	var labels := PackedStringArray(items.map(func(x): return String(x)))
-	picker = UxmlPopupMenu.open(_popup_anchor(anchor), labels, -1, doc.theme_path, doc)
+	picker = doc.show_context_menu(_menu_point(anchor), labels)
+	if picker == null:
+		return
 	picker.chosen.connect(_on_menu_chosen.bind(labels, then))
 	picker.popup_hide.connect(_on_menu_hidden, CONNECT_DEFERRED)
 
@@ -1147,14 +1170,7 @@ func remembered_choice(property: String) -> Variant:
 func ask_target(property: String, cs: Array, at: Vector2, then: Callable, cancelled: Callable = Callable()) -> void:
 	_close_picker()
 	pending = {"property": property, "choices": cs, "then": then, "cancel": cancelled}
-	var labels := PackedStringArray(cs.map(func(c): return String(c["label"])))
-	labels.append("Cancel")
-	_anchor = Control.new()
-	_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_anchor)
-	_anchor.size = Vector2(maxf(size.x - 24, 300), 18)
-	_anchor.global_position = at
-	picker = UxmlPopupMenu.open(_anchor, labels, -1, doc.theme_path, doc)
+	picker = doc.show_context_menu(at, _question_items(cs))
 	picker.chosen.connect(choose)
 	picker.popup_hide.connect(_on_picker_hidden, CONNECT_DEFERRED)
 
@@ -1192,6 +1208,9 @@ func _on_style_focus(field: String) -> void:
 
 
 func _on_value_changed(field: String, value: Variant) -> void:
+	if field.ends_with("-section"):
+		_compact()
+		return
 	if _applying or _node == null or not _fields.has(field):
 		return
 	var f: Dictionary = _fields[field]

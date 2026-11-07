@@ -21,17 +21,16 @@ var _frames := 60
 var _dir := ""
 var _m: EdMain
 var _rows: Array = []
-## Full renders, render patches and inspector builds before a scenario.
-var _counts := [0, 0, 0]
+## Full renders, render patches, inspector builds, and the layout passes of
+## the inspector and of the window before a scenario.
+var _counts := [0, 0, 0, 0, 0]
 var _render_ms: Array = []
 
 
-## [full renders, render patches, inspector builds] so far (0 for a
-## counter that the editor build does not have).
+## The counters so far (_counts).
 func _now_counts() -> Array:
 	var h := _m.canvas.host
-	return [int(h.get("renders") if h.get("renders") != null else 0), int(h.get("patches") if h.get("patches") != null else 0),
-		int(_m.inspector.get("builds") if _m.inspector.get("builds") != null else 0)]
+	return [h.renders, h.patches, _m.inspector.builds, _m.inspector.doc.layout_count, _m.shell.layout_count]
 
 
 func _on_rendered() -> void:
@@ -151,9 +150,9 @@ func _run() -> void:
 
 func _print_table() -> void:
 	print("")
-	print("%-36s %8s %8s %8s %8s %8s %8s" % ["scenario (ms per frame)", "median", "p95", "max", "renders", "patches", "builds"])
+	print("%-44s %8s %8s %8s %8s %8s %8s %8s %8s" % ["scenario (ms per frame)", "median", "p95", "max", "renders", "patches", "builds", "lay.insp", "lay.win"])
 	for r in _rows:
-		print("%-36s %8.2f %8.2f %8.2f %8d %8d %8d" % r)
+		print("%-44s %8.2f %8.2f %8.2f %8d %8d %8d %8d %8d" % r)
 
 
 func _finish() -> void:
@@ -216,12 +215,35 @@ func _timeline_scenarios(entry: String) -> void:
 	var bar := tl.to_global(r.position + Vector2(r.size.x * 0.5, r.size.y * 0.5))
 	_button(bar, true)
 	await _wait(1)
-	await _measure("timeline: drag a bar (one edit per frame)", func(i): _move(bar + Vector2(float(i % 20) * 3.0 + 2.0, 0), true))
+	await _measure("timeline: drag a bar (one move per frame)", func(i): _move(bar + Vector2(float(i % 20) * 3.0 + 2.0, 0), true))
 	_button(bar, false)
 	await _wait(3)
+	# The first drag asks for the target; later drags remember the choice.
 	_m.inspector.choose(0)
 	await _wait(3)
 	print("history after the bar drag: %s" % _m.state.workspace.history.undo_label())
+	# Bar drags with the remembered target: the frame of the release, then
+	# the render after the pause.
+	var rel_ms: Array = []
+	var reload_ms: Array = []
+	for d in 8:
+		r = tl.bar_rect(0)
+		bar = tl.to_global(r.position + Vector2(r.size.x * 0.5, r.size.y * 0.5))
+		_button(bar, true)
+		await _wait(1)
+		# Far enough for a new value after the snap, right then left.
+		_move(bar + Vector2(40.0 if d % 2 == 0 else -40.0, 0), true)
+		await _wait(2)
+		var depth := _m.state.workspace.history.undo_depth()
+		_button(bar, false)
+		rel_ms.append(await _worst_frame(2))
+		if _m.state.workspace.history.undo_depth() != depth + 1:
+			print("bench: the release of drag %d wrote nothing" % d)
+		_m.flush_waiting_render.call_deferred()
+		reload_ms.append(await _worst_frame(2))
+		await _wait(2)
+	_row_of("timeline: release of a bar drag (write)", rel_ms)
+	_row_of("timeline: render after the pause", reload_ms)
 	tl.stop()
 	await _wait(2)
 
@@ -247,7 +269,28 @@ func _measure(label: String, step: Callable, seconds: float = 0.0) -> void:
 	var med: float = times[times.size() / 2]
 	var p95: float = times[mini(times.size() - 1, int(times.size() * 0.95))]
 	var now := _now_counts()
-	_rows.append([label, med, p95, times[-1], now[0] - _counts[0], now[1] - _counts[1], now[2] - _counts[2]])
+	_rows.append([label, med, p95, times[-1], now[0] - _counts[0], now[1] - _counts[1], now[2] - _counts[2], now[3] - _counts[3], now[4] - _counts[4]])
+	_counts = now
+
+
+## The time of the slowest of the next `n` frames in ms.
+func _worst_frame(n: int) -> float:
+	var worst := 0.0
+	var last := Time.get_ticks_usec()
+	for i in n:
+		await process_frame
+		var now := Time.get_ticks_usec()
+		worst = maxf(worst, (now - last) / 1000.0)
+		last = now
+	return worst
+
+
+## A table row of samples in ms.
+func _row_of(label: String, times: Array) -> void:
+	times.sort()
+	var now := _now_counts()
+	_rows.append([label, times[times.size() / 2], times[mini(times.size() - 1, int(times.size() * 0.95))], times[-1],
+		now[0] - _counts[0], now[1] - _counts[1], now[2] - _counts[2], now[3] - _counts[3], now[4] - _counts[4]])
 	_counts = now
 
 

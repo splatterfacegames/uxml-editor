@@ -89,8 +89,6 @@ func test_range_end() -> void:
 	eq(EdDiagnostics.range_end(ws, "a.uxml", 9), "<ui:UXML><ui:Label text=\"x\" bad=\"1\" />".length(), "an open tag")
 	eq(EdDiagnostics.range_end(ws, "a.uxml", 28), 35, "an attribute")
 	eq(EdDiagnostics.range_end(ws, "a.uss", 5), 11, "a token")
-	eq(EdDiagnostics.severity_of("missing-file"), "error")
-	eq(EdDiagnostics.severity_of("unsupported-property"), "warning")
 
 
 # ---------------------------------------------------------------------------
@@ -223,13 +221,16 @@ func test_the_hierarchy_context_menu_runs_edit_commands() -> void:
 	mouse_button(m, r.get_center(), true, MOUSE_BUTTON_RIGHT)
 	mouse_button(m, r.get_center(), false, MOUSE_BUTTON_RIGHT)
 	await frames()
-	ok(m.context_menu != null, "a right click opens the menu")
+	var menu := m.shell.get_context_menu()
+	ok(menu != null, "a right click opens the menu")
+	eq(menu.document().editor_theme, "always", "the menu has the editor look of the window")
+	eq(menu.document().editor_skin, "dark", "and the skin of the window")
 	eq(m.state.selected_node().get_attribute("name"), "quit-button", "the row is selected")
 	var dup := -1
 	for i in EdMain.CONTEXT_MENU.size():
 		if EdMain.CONTEXT_MENU[i][1] == "duplicate":
 			dup = i
-	m.context_menu.chosen.emit(dup)
+	menu.chosen.emit(dup)
 	await frames()
 	ok(m.state.workspace.text(MENU).contains("quit-button-copy"), "Duplicate from the menu")
 	eq(m.state.workspace.history.undo_depth(), 1, "one undo step")
