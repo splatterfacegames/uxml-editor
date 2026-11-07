@@ -8,9 +8,9 @@ name: CI
 
 on:
   push:
-    branches: [godot]
+    branches: [main, godot]
   pull_request:
-    branches: [godot]
+    branches: [main, godot]
   workflow_dispatch:
 
 env:
