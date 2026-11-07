@@ -6,7 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
+### Changed (Godot rebuild, branch `godot`)
+
+- The editor is a Godot 4.7 application. godot-uxml renders the edited
+  document and the editor window; the React/Tauri app and the vendored
+  `uxml-preview` engine are removed from this branch (ADR 0006).
+- godot-uxml is pinned as a synced copy (`godot-uxml.pin`,
+  `tools/update_godot_uxml.py`, ADR 0007).
+- The source-backed core is ported to GDScript (`src/core/`) with its
+  tests, a round trip of 211 fixtures, and parser alignment checks
+  against godot-uxml.
+- Milestone 1 views: canvas (live render, pan, zoom, screen presets,
+  themes, selection, hit-test), hierarchy, source view, inspector v1
+  (attributes and inline styles), one undo history, revision-checked
+  saves, reload of clean files changed on disk.
+
+### Added (Tauri editor, `main`)
 
 - `--open <project-dir>` (or a bare directory argument) opens a Unity project
   on launch. The native host claims the path once through

@@ -1,5 +1,11 @@
 # ADR 0005: Recovery Journal
 
+> **Status: accepted, not yet implemented in the Godot app.** The Godot app
+> has revision-checked atomic saves (`src/core/project_store.gd`) and
+> reloads clean files that changed on disk. The recovery journal is a later
+> milestone (`docs/roadmap.md`). The file names below are on `main`.
+
+
 ## Decision
 
 Unsaved editor state is journaled as a bounded, versioned, validated record

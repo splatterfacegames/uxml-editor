@@ -1,117 +1,141 @@
 # UXML Editor
 
-Standalone visual editor for Unity UI Toolkit UXML and USS. The editor core is
-browser-first; Tauri 2 provides a thin Windows desktop host for native
-filesystem operations.
+UXML Editor is a visual editor for Unity UI Toolkit documents (UXML) and
+stylesheets (USS). The editor is a Godot 4.7 application.
+[godot-uxml](https://github.com/jethac/godot-uxml) renders the documents.
 
-Editing is source-backed: every hierarchy, canvas, and inspector action is a
-patch against the original UXML/USS bytes, so comments, attribute order, and
-user formatting survive a round trip.
+> The `godot` branch holds the Godot rebuild. The `main` branch holds the
+> previous React and Tauri editor.
 
-![UXML Editor workbench: palette and hierarchy on the left, the rendered UXML
-canvas in the middle, inspector on the right, diagnostics below](docs/screenshots/workbench-1366x768.png)
+![The editor with the menu fixture: project and hierarchy on the left, the
+canvas with the selected button in the center, the source view and the
+diagnostics below, the inspector on the right](docs/screenshots/m1-menu-selection.png)
 
-## What works
+## Source text is the truth
 
-- **Projects** — open a directory through the File System Access API in the
-  browser or the native picker on desktop; enumerate, read, and save `.uxml`
-  and `.uss` files with revision checks, external-change watching, and crash
-  recovery.
-- **Canvas** — Yoga-backed preview with selection, drag/resize manipulation,
-  and static pseudo-state toggles.
-- **Hierarchy** — reparent, reorder, insert, and delete elements from a
-  palette of `uxml-preview`'s renderers.
-- **Inspector** — provenance-aware attribute and style authoring that shows
-  which rule a computed value came from and writes to the matching source.
-- **Source** — CodeMirror editing of the same documents, kept in sync with the
-  visual views through one transaction/undo history.
-- **Diagnostics** — parser and renderer warnings surfaced per document.
+The editor changes a file only with a patch on the exact text of the
+file. A patch replaces one range of characters. All other bytes stay the
+same: comments, attribute order, quote style, entities, whitespace and
+line endings. An edit that cannot be made as an exact patch stops with a
+message. Such an edit changes no file and adds no undo step.
 
-## Not implemented
+## Features
 
-- Animation of any kind. USS transitions are parsed and preserved but never
-  played; pseudo-state toggles are static.
-- Unity 6.3 features. Rendering comes from the vendored `uxml-preview` 0.5.0
-  engine in [`vendor/uxml-preview`](vendor/uxml-preview), which is measured
-  against Unity 6000.0.40f1 and has no `filter`, `aspect-ratio`, SVG, 9-slice,
-  or text-outline support.
-- Controls beyond `VisualElement`, `Label`, `Button`, `Image`, `ScrollView`,
-  `Toggle`, `TextField`, `IntegerField`, `FloatField`, `DropdownField`,
-  `Slider`, `SliderInt`, and `Foldout`. Unknown controls stay in the tree,
-  render as fallback boxes, and raise a warning. Everything after `ScrollView`
-  is built from Unity's documented element names and USS classes rather than
-  from measurements, so captions, classes, and nesting are right but default
-  sizes and spacing are not; each says so through a diagnostic.
-- Atomic conditional replacement off Windows. The native
-  `replaceTextAtomically` returns `unsupported` on other platforms; the browser
-  host uses its own revision-checked write path.
+- **Projects.** Open a project directory. The editor lists every `.uxml`
+  and `.uss` file and skips Unity cache folders.
+- **Canvas.** godot-uxml renders the active document from the text in the
+  editor, also before a save. Select an element with a click. Pan and zoom
+  the view. Select a screen size and a theme: auto, runtime, editor dark
+  or editor light.
+- **Hierarchy.** The tree shows the authored elements. A selection in the
+  tree, the canvas or the source view selects the same element in all
+  views.
+- **Source view.** Edit the text directly. A pause in typing makes one
+  patch. The other views then show the change.
+- **Inspector.** Edit, add and remove attributes and inline style
+  declarations. Unset style fields show the computed value and the origin
+  of the value (a stylesheet, the theme, or a parent).
+- **Undo.** One history records the edits of all views.
+- **Save.** A save writes only the changed files. Before the write, the
+  editor compares the file on disk with the version that the editor read.
+  When another program changed the file, the editor asks before an
+  overwrite.
+- **Diagnostics.** The panel shows godot-uxml diagnostics and the parse
+  problems of the editor.
+
+`docs/roadmap.md` lists the next milestones: the palette, drag and resize,
+the provenance inspector, recovery, pseudo-state preview, the transition
+timeline, the state-machine panel and the web export.
 
 ## Requirements
 
-- Node.js `>=24.15.0 <25`, with npm
-- Rust stable (desktop host)
-- Windows: Visual Studio C++ build tools, the Windows SDK, and the WebView2
-  runtime
-- Linux (host development only): `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
-  `libsoup-3.0-dev`, `librsvg2-dev`, `libjavascriptcoregtk-4.1-dev`,
-  `pkg-config`
+- Godot 4.7.1 (standard build, not .NET).
+- Windows x64 for the native core of godot-uxml. Other platforms use the
+  GDScript path of godot-uxml. The results are the same.
+- Python 3.10 or later, only to update godot-uxml.
 
-## Commands
+## Run the editor
 
-```bash
-npm ci
-npm run dev              # Vite dev server on :1420
-npm run typecheck        # tsc --noEmit
-npm test                 # Vitest unit and integration suites
-npm run test:e2e         # Playwright, against the dev server
-npm run test:rust        # cargo test for the desktop host
-npm run check:licenses   # dependency license allowlist
-npm run build            # typecheck + browser production build
-npm run tauri:dev
-npm run tauri:build      # Windows installer and portable artifacts
-npm run smoke:packaged      # artifact + --version-file checks on the built exe
-npm run smoke:packaged:app  # Windows: drives the packaged app over WebView2 CDP
+1. Import the project one time:
+
+   ```
+   godot --headless --path . --import
+   ```
+
+2. Start the editor:
+
+   ```
+   godot --path .
+   ```
+
+3. Click **Open Project…** and select the project directory.
+
+To open a project at start, add options after `--`:
+
+```
+godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 ```
 
-CI runs the same commands on Linux and repeats the host tests plus a
-`tauri build --no-bundle` on Windows, which is the only platform that exercises
-the conditional-replacement implementation.
+| Option | Function |
+| --- | --- |
+| `--project=<dir>` | Open the project directory. |
+| `--open=<path>` | Open the UXML document (path in the project). |
+| `--select=<name>` | Select the element with this `name` attribute. |
+| `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
+| `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
+| `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
 
-The packaged executable accepts `--open <project-dir>` (or a bare directory
-argument) to open a project on launch. `smoke:packaged:app` uses that flag
-plus `UXML_EDITOR_CDP_PORT` — an opt-in WebView2 remote-debugging port the
-app honors only when the variable is set — to drive a real
-open → save → edit → relaunch cycle against files on disk.
+## Keyboard shortcuts
 
-## Architecture
+| Keys | Function |
+| --- | --- |
+| Ctrl+O | Open a project directory. |
+| Ctrl+S | Save the active document and its stylesheets. |
+| Ctrl+Shift+S | Save all changed files. |
+| Ctrl+Z | Undo. |
+| Ctrl+Y or Ctrl+Shift+Z | Redo. |
+| Ctrl+= and Ctrl+- | Zoom in and zoom out. |
+| F (canvas) | Fit the screen in the canvas. |
+| Mouse wheel (canvas) | Zoom at the pointer. |
+| Middle drag, or Space or Alt with a drag (canvas) | Pan. |
+| Delete (canvas) | Remove the selected element. |
 
-`src/core` holds the host-agnostic editor: the source patch engine, document
-sessions, transactions, stable locators, UXML/USS commands, and the
-persistence/recovery layer. `src/features` holds the panels. `src/app` wires a
-host implementation (`BrowserHost`, `MemoryHost`, or the Tauri host in
-`src-tauri`) into the shell.
+## Test
 
-The preview engine is vendored source, not an npm dependency:
-[`vendor/uxml-preview`](vendor/uxml-preview) holds `uxml-preview` 0.5.0 under
-Apache-2.0, with its upstream test suite, its license, and the import recorded
-in [`vendor/uxml-preview/PROVENANCE.md`](vendor/uxml-preview/PROVENANCE.md). It
-is vendored because Unity 6.3 parity, controls beyond its five renderers, and
-transition playback all need engine changes upstream has scoped out. `npm test`
-runs the upstream suite, so engine edits still have to satisfy the measurements
-they came from.
+```
+godot --headless --path . --import
+godot --headless --path . -s res://tests/run_tests.gd
+godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
+```
 
-It is reachable from exactly one file,
-`src/core/adapter/UxmlPreviewAdapter.ts`; an import-boundary test enforces that,
-that the package is absent from `dependencies`, and that the app's TypeScript
-program stays free of Node typings.
+The second command uses the native core of godot-uxml. The third command
+uses the GDScript path. Add `--filter=<text>` to run only the tests with
+that text in the file or test name. The exit code is the number of failed
+tests.
 
-Layering and the fidelity model are described in
-[`docs/architecture.md`](docs/architecture.md); what the preview can and cannot
-reproduce — including which controls are measured versus merely documented —
-is in [`docs/compatibility.md`](docs/compatibility.md). Decisions are recorded
-in [`docs/adr`](docs/adr).
+## Update godot-uxml
+
+The editor uses a copy of `addons/godot_uxml` from one godot-uxml commit.
+`godot-uxml.pin` records the commit. Do not change the copy. To move the
+pin:
+
+```
+python tools/update_godot_uxml.py --ref <commit> [--source <checkout-or-url>]
+```
+
+Then run the tests on both paths. `docs/godot-uxml-requests.md` lists the
+godot-uxml APIs that the editor needs.
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md): layers, rendering, the
+  history, the window.
+- [docs/godot-uxml-requests.md](docs/godot-uxml-requests.md): API requests
+  for godot-uxml.
+- [docs/roadmap.md](docs/roadmap.md): the next milestones.
+- [docs/adr/](docs/adr/): decision records.
 
 ## License
 
-Original code is licensed under Apache-2.0. See [`LICENSE`](LICENSE) and
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+Apache-2.0. See [LICENSE](LICENSE) and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

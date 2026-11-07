@@ -1,5 +1,10 @@
 # ADR 0001: Application Shell
 
+> **Status: superseded by [ADR 0006](0006-godot-host.md) (2026-11-07).**
+> The editor is no longer a Tauri/React application. This record stays as
+> history; the evidence below describes the old `main` branch.
+
+
 ## Decision
 
 Use Tauri 2 as a thin desktop host around a browser-first React editor core.

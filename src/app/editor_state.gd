@@ -36,6 +36,9 @@ func has_project() -> bool:
 
 
 func open_project(dir: String) -> bool:
+	var probe := DirAccess.open(dir)
+	if probe != null:
+		dir = probe.get_current_dir()
 	var s := EdProjectStore.new(dir)
 	if not s.is_valid():
 		status.emit("%s is not a directory." % dir, true)

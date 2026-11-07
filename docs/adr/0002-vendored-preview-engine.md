@@ -1,5 +1,12 @@
 # ADR 0002: Vendored Preview Engine
 
+> **Status: superseded by [ADR 0006](0006-godot-host.md) and
+> [ADR 0007](0007-godot-uxml-pin.md) (2026-11-07).** godot-uxml renders the
+> document; `uxml-preview` is not in the Godot app. "Yoga owns layout" and
+> the adapter boundary of this record no longer apply. godot-uxml lays out
+> with its own flexbox implementation, verified against Unity 6000.3.
+
+
 ## Decision
 
 Redistribute the `uxml-preview` engine as source under `vendor/uxml-preview/`

@@ -1,3 +1,7 @@
+# Text files are stored and checked out with LF. Godot reads either.
+* text=auto eol=lf
+*.png binary
+*.woff2 binary
 # Fixture projects are byte-exact test oracles (CRLF menu, LF others). Check
 # out blob bytes verbatim on every platform.
 fixtures/** -text

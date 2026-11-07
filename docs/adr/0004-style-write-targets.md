@@ -1,5 +1,15 @@
 # ADR 0004: Style Write Targets
 
+> **Status: accepted, partly implemented in the Godot app.** Style targets
+> (`EdUssCommands.inline_target`, `rule_target`, `new_rule_target`) freeze
+> the source and the exact spans, and a stale commit is refused. Milestone
+> 1 writes inline styles only; the target picker over all cascade
+> candidates waits for godot-uxml request R5. godot-uxml already reports
+> the winning origin of each computed value. The `evidence`
+> (measured/documented) labels below came from `uxml-preview`; godot-uxml
+> theme values are all measured in Unity 6000.3.
+
+
 ## Decision
 
 Inspector style edits are written to an explicit, user-visible destination —
