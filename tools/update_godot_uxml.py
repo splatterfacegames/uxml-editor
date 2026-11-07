@@ -7,6 +7,7 @@ clone of the editor runs without a second checkout.
 
 Usage:
     python tools/update_godot_uxml.py --ref <commit-or-branch> [--source <path-or-url>]
+    python tools/update_godot_uxml.py --verify     (CI: the copy matches the pin)
 
 --source defaults to https://github.com/splatterfacegames/godot-uxml.git. A local
 checkout is read with `git archive`, so the files come from the commit,
@@ -17,6 +18,7 @@ resolved commit.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import shutil
 import subprocess
@@ -49,7 +51,8 @@ def checkout_for(source: str, ref: str, scratch: Path) -> Path:
 
 
 def extract(checkout: Path, commit: str, prefix: str) -> dict[str, bytes]:
-    data = git("archive", "--format=tar", commit, prefix, cwd=checkout)
+    # No eol conversion (core.autocrlf): the blobs of the commit, byte for byte.
+    data = git("-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", commit, prefix, cwd=checkout)
     files: dict[str, bytes] = {}
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
         for member in tar.getmembers():
@@ -75,11 +78,41 @@ def write_tree(files: dict[str, bytes], prefix: str, dest: Path, keep) -> int:
     return count
 
 
+def tree_hash(root: Path) -> tuple[int, str]:
+    """SHA-256 over the sorted relative paths and bytes of every file under root."""
+    h = hashlib.sha256()
+    count = 0
+    for f in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = f.relative_to(root).as_posix()
+        h.update(rel.encode() + b"\0" + f.read_bytes() + b"\0")
+        count += 1
+    return count, h.hexdigest()
+
+
+def verify() -> int:
+    """Check the addon copy against godot-uxml.pin (no network: the pin has the hash)."""
+    pin = dict(
+        line.split("=", 1)
+        for line in (REPO / "godot-uxml.pin").read_text().splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    count, digest = tree_hash(REPO / ADDON)
+    ok = str(count) == pin.get("addon_files") and digest == pin.get("addon_sha256")
+    print(f"godot-uxml {pin.get('commit', '?')[:7]}: {count} files, sha256 {digest[:16]}... "
+          + ("matches the pin" if ok else f"DIFFERS from the pin ({pin.get('addon_files')} files, {pin.get('addon_sha256', '?')[:16]}...)"))
+    return 0 if ok else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--ref", required=True, help="godot-uxml commit, tag or branch")
+    parser.add_argument("--ref", help="godot-uxml commit, tag or branch")
     parser.add_argument("--source", default=DEFAULT_SOURCE, help="local checkout or clone URL")
+    parser.add_argument("--verify", action="store_true", help="check the addon copy against the pin and exit")
     args = parser.parse_args()
+    if args.verify:
+        return verify()
+    if not args.ref:
+        parser.error("--ref is required")
 
     with tempfile.TemporaryDirectory() as tmp:
         checkout = checkout_for(args.source, args.ref, Path(tmp))
@@ -93,6 +126,7 @@ def main() -> int:
         cases, CASES, CASES_DEST, lambda rel: Path(rel).suffix in CASE_SUFFIXES
     )
     (CASES_DEST / ".gdignore").write_text("")
+    _, digest = tree_hash(REPO / ADDON)
     pin = (
         "# godot-uxml pin. Written by tools/update_godot_uxml.py. Do not edit.\n"
         f"commit={commit}\n"
@@ -100,6 +134,7 @@ def main() -> int:
         f"source={args.source if not Path(args.source).is_dir() else DEFAULT_SOURCE}\n"
         f"synced={datetime.now(timezone.utc).replace(microsecond=0).isoformat()}\n"
         f"addon_files={addon_count}\n"
+        f"addon_sha256={digest}\n"
         f"parity_cases={case_count}\n"
     )
     (REPO / "godot-uxml.pin").write_text(pin, newline="\n")
