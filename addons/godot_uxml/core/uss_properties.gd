@@ -1,0 +1,608 @@
+class_name UssProperties
+extends RefCounted
+## Which properties inherit, how shorthands split, and which property names
+## are inside the supported subset.
+##
+## Ported from vendor/uxml-preview/src/style/properties.ts (Apache-2.0).
+## Shorthand expansion belongs to the cascade rather than to layout: once a
+## sheet contains both `padding` and `padding-top`, deciding which one wins is
+## a cascade question, and it cannot be answered without splitting first.
+
+## Properties a child picks up from its parent when it declares nothing.
+## Custom properties (`--*`) also inherit — that is what makes the
+## design-token pattern work.
+const INHERITED := {
+	"color": true,
+	"font-size": true,
+	"letter-spacing": true,
+	"word-spacing": true,
+	"visibility": true,
+	"white-space": true,
+	"-unity-font": true,
+	"-unity-font-definition": true,
+	"-unity-font-style": true,
+	"-unity-paragraph-spacing": true,
+	"-unity-text-align": true,
+	"-unity-text-outline-color": true,
+	"-unity-text-outline-width": true,
+	"text-shadow": true,
+	"-unity-text-generator": true,
+	"-unity-editor-text-rendering-mode": true,
+	# Unity 6.3 keeps both in InheritedData.
+	"-unity-material": true,
+	"-unity-text-auto-size": true,
+}
+
+## Property names inside the planned support envelope — the dedicated flex
+## subset layout plus the appearance properties the final scope requires.
+## Anything else still parses and cascades (the cascade is about which value
+## wins, not what the value means) but the resolver reports it as
+## `unsupported-property` so a typo or an out-of-scope feature is never
+## silent. Until the layout/runtime milestone lands, EVERY property is
+## declaration-only: being listed here means "in scope", not "renders".
+##
+## Still outside the envelope (warn): the transition-* properties, which
+## belong to the transition runtime.
+const SUPPORTED := {
+	# display
+	"display": true, "visibility": true,
+	# flex
+	"flex": true, "flex-direction": true, "flex-wrap": true,
+	"flex-grow": true, "flex-shrink": true, "flex-basis": true,
+	"justify-content": true, "align-items": true, "align-self": true,
+	"align-content": true, "gap": true, "row-gap": true, "column-gap": true,
+	# positioning
+	"position": true, "top": true, "right": true, "bottom": true, "left": true,
+	"aspect-ratio": true,
+	# box
+	"width": true, "height": true,
+	"min-width": true, "min-height": true, "max-width": true, "max-height": true,
+	"margin": true, "margin-top": true, "margin-right": true,
+	"margin-bottom": true, "margin-left": true,
+	"padding": true, "padding-top": true, "padding-right": true,
+	"padding-bottom": true, "padding-left": true,
+	"border-width": true,
+	"border-top-width": true, "border-right-width": true,
+	"border-bottom-width": true, "border-left-width": true,
+	"border-color": true,
+	"border-top-color": true, "border-right-color": true,
+	"border-bottom-color": true, "border-left-color": true,
+	"border-radius": true,
+	"border-top-left-radius": true, "border-top-right-radius": true,
+	"border-bottom-right-radius": true, "border-bottom-left-radius": true,
+	# background & text
+	"background-color": true, "background-image": true,
+	"color": true, "font-size": true, "white-space": true,
+	"-unity-font": true, "-unity-font-definition": true,
+	"-unity-font-style": true, "-unity-text-align": true,
+	# 9-slice backgrounds, image tint, text outline
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+	"-unity-slice-scale": true,
+	"-unity-background-image-tint-color": true,
+	"-unity-text-outline": true,
+	"-unity-text-outline-width": true, "-unity-text-outline-color": true,
+	# transitions (runtime/uss_transitions.gd)
+	"transition": true, "transition-property": true, "transition-duration": true,
+	"transition-delay": true, "transition-timing-function": true,
+	# opacity, clipping, transforms
+	"opacity": true, "overflow": true, "-unity-overflow-clip-box": true,
+	"translate": true, "rotate": true, "scale": true, "transform-origin": true,
+	# text
+	"letter-spacing": true, "word-spacing": true, "-unity-paragraph-spacing": true,
+	"text-shadow": true, "text-overflow": true, "-unity-text-overflow-position": true,
+	# Accepted and ignored: Godot has one text generator and one glyph
+	# rendering path (docs/design.md, "Visual properties").
+	"-unity-text-generator": true, "-unity-editor-text-rendering-mode": true,
+	# background image placement (background-position and
+	# -unity-background-scale-mode are shorthands for these)
+	"background-position": true,
+	"background-position-x": true, "background-position-y": true,
+	"background-repeat": true, "background-size": true,
+	"-unity-background-scale-mode": true, "-unity-slice-type": true,
+	# Unity 6.3: filter functions, custom materials, best-fit text
+	"filter": true, "-unity-material": true, "-unity-text-auto-size": true,
+	# other
+	"cursor": true, "all": true,
+}
+
+## Unity's EasingMode names, in enum order (index 0, `ease`, is also the
+## value of an unknown name).
+const EASING_MODES := [
+	"ease", "ease-in", "ease-out", "ease-in-out", "linear",
+	"ease-in-sine", "ease-out-sine", "ease-in-out-sine",
+	"ease-in-cubic", "ease-out-cubic", "ease-in-out-cubic",
+	"ease-in-circ", "ease-out-circ", "ease-in-out-circ",
+	"ease-in-elastic", "ease-out-elastic", "ease-in-out-elastic",
+	"ease-in-back", "ease-out-back", "ease-in-out-back",
+	"ease-in-bounce", "ease-out-bounce", "ease-in-out-bounce",
+]
+
+const _CSS_KEYWORDS := ["inherit", "initial", "auto", "unset", "true", "false", "none"]
+static var _re_time := RegEx.create_from_string("^-?(\\d+\\.?\\d*|\\.\\d+)(s|ms)$")
+
+
+## `transition: <property> <duration> <delay> <easing>, ...` -> the four
+## comma-separated longhand lists, following Unity's
+## ShorthandApplicator.CompileTransition: per item, the first time is the
+## duration and the second the delay; an easing name is the timing
+## function, any other identifier the property; `none` is valid only as the
+## single first item. An invalid value sets all four longhands to their
+## initial values (all / 0s / 0s / ease) instead of being dropped.
+static func _expand_transition(value: String) -> Array:
+	var v := value.strip_edges()
+	var props := PackedStringArray()
+	var durs := PackedStringArray()
+	var delays := PackedStringArray()
+	var easings := PackedStringArray()
+	var valid := not (v == "initial" or v == "unset" or v == "inherit" or v.is_empty())
+	if valid:
+		var groups := v.split(",")
+		var none_found := false
+		var count := 0
+		for g in groups.size():
+			if none_found:
+				valid = false
+				break
+			var tokens := split_value(groups[g])
+			if tokens.is_empty() and g == groups.size() - 1 and g > 0:
+				break  # trailing comma: Unity's reader stops at the end of input
+			var p := "all"
+			var d := "0s"
+			var dl := "0s"
+			var e := "ease"
+			var has_p := false
+			var has_d := false
+			var has_dl := false
+			var has_e := false
+			for tok in tokens:
+				var t := String(tok)
+				var lt := t.to_lower()
+				if _CSS_KEYWORDS.has(lt):
+					if lt == "none" and count == 0:
+						none_found = true
+						has_p = true
+						p = "none"
+					else:
+						valid = false
+				elif _re_time.search(lt) != null:
+					if not has_d:
+						has_d = true
+						d = t
+					elif not has_dl:
+						has_dl = true
+						dl = t
+					else:
+						valid = false
+				elif not has_e and EASING_MODES.has(lt):
+					has_e = true
+					e = lt
+				elif not has_p and _is_ident(t):
+					has_p = true
+					p = t
+				else:
+					valid = false
+			props.append(p)
+			durs.append(d)
+			delays.append(dl)
+			easings.append(e)
+			count += 1
+			if not valid:
+				break
+	if not valid:
+		props = PackedStringArray(["all"])
+		durs = PackedStringArray(["0s"])
+		delays = PackedStringArray(["0s"])
+		easings = PackedStringArray(["ease"])
+	return [
+		["transition-property", ", ".join(props)],
+		["transition-duration", ", ".join(durs)],
+		["transition-delay", ", ".join(delays)],
+		["transition-timing-function", ", ".join(easings)],
+	]
+
+
+static func _is_ident(t: String) -> bool:
+	if t.is_empty():
+		return false
+	var c := t.unicode_at(0)
+	# letters, '-' or '_' start an identifier; digits do not.
+	return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 45 or c == 95
+
+
+## Shorthands: never present in a computed style, only their longhands.
+const _SHORTHANDS := {
+	"flex": true, "gap": true, "margin": true, "padding": true,
+	"border-width": true, "border-color": true, "border-radius": true,
+	"-unity-text-outline": true, "background-position": true,
+	"-unity-background-scale-mode": true, "all": true,
+}
+
+## `all: initial` resets every supported longhand. Custom properties are
+## not affected (Unity: "Does not apply to custom USS properties").
+static var _all_initial: Array = []
+
+
+static func _expand_all(value: String) -> Array:
+	if value.strip_edges().to_lower() != "initial":
+		return []  # Unity accepts only `all: initial`
+	if _all_initial.is_empty():
+		for prop in SUPPORTED:
+			if not _SHORTHANDS.has(prop):
+				_all_initial.append([prop, "initial"])
+	return _all_initial
+
+
+## background-position shorthand (Unity StyleSheetApplicator
+## CompileBackgroundPosition): 1 keyword, 2 lengths (x y), 2 keywords in
+## either order, keyword keyword length, keyword length keyword, or
+## keyword length keyword length. Any other shape is invalid.
+static func _expand_background_position(value: String) -> Array:
+	var p := split_value(value)
+	var kws := {"left": "x", "right": "x", "top": "y", "bottom": "y", "center": "c"}
+	var is_kw := func(t: String) -> bool: return kws.has(t.to_lower())
+	var x := ""
+	var y := ""
+	match p.size():
+		1:
+			var k := String(p[0]).to_lower()
+			if not kws.has(k):
+				return []
+			if k == "left" or k == "right":
+				x = k
+				y = "center"
+			elif k == "top" or k == "bottom":
+				x = "center"
+				y = k
+			else:
+				x = "center"
+				y = "center"
+		2:
+			if not is_kw.call(p[0]) and not is_kw.call(p[1]):
+				x = "left " + p[0]
+				y = "top " + p[1]
+			elif is_kw.call(p[0]) and is_kw.call(p[1]):
+				var k1 := String(p[0]).to_lower()
+				var k2 := String(p[1]).to_lower()
+				if k2 == "left" or k2 == "right" or k1 == "top" or k1 == "bottom":
+					var t := k1
+					k1 = k2
+					k2 = t
+				x = k1
+				y = k2
+			else:
+				return []
+		3:
+			if is_kw.call(p[0]) and is_kw.call(p[1]) and not is_kw.call(p[2]):
+				x = String(p[0]).to_lower()
+				y = String(p[1]).to_lower() + " " + p[2]
+			elif is_kw.call(p[0]) and not is_kw.call(p[1]) and is_kw.call(p[2]):
+				x = String(p[0]).to_lower() + " " + p[1]
+				y = String(p[2]).to_lower()
+			else:
+				return []
+		4:
+			if is_kw.call(p[0]) and not is_kw.call(p[1]) and is_kw.call(p[2]) and not is_kw.call(p[3]):
+				x = String(p[0]).to_lower() + " " + p[1]
+				y = String(p[2]).to_lower() + " " + p[3]
+			else:
+				return []
+		_:
+			return []
+	return [["background-position-x", x], ["background-position-y", y]]
+
+
+## -unity-background-scale-mode (Unity BackgroundPropertyHelper): sets the
+## four background placement longhands.
+static func _expand_scale_mode(value: String) -> Array:
+	var size := ""
+	match value.strip_edges().to_lower():
+		"stretch-to-fill":
+			size = "100% 100%"
+		"scale-and-crop":
+			size = "cover"
+		"scale-to-fit":
+			size = "contain"
+		_:
+			return []
+	return [
+		["background-position-x", "center"], ["background-position-y", "center"],
+		["background-repeat", "no-repeat no-repeat"], ["background-size", size],
+	]
+
+## Shorthand -> longhands. Radii run clockwise from the top-left corner,
+## not top/right/bottom/left.
+const BOX_SHORTHANDS := {
+	"margin": ["margin-top", "margin-right", "margin-bottom", "margin-left"],
+	"padding": ["padding-top", "padding-right", "padding-bottom", "padding-left"],
+	"border-width": [
+		"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+	],
+	"border-color": [
+		"border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+	],
+	"border-radius": [
+		"border-top-left-radius", "border-top-right-radius",
+		"border-bottom-right-radius", "border-bottom-left-radius",
+	],
+}
+
+
+static func is_inherited(property: String) -> bool:
+	return property.begins_with("--") or INHERITED.has(property)
+
+
+static func is_supported(property: String) -> bool:
+	return property.begins_with("--") or SUPPORTED.has(property)
+
+
+## Split a value on top-level whitespace, keeping `rgb(1, 2, 3)` in one piece.
+static func split_value(value: String) -> Array:
+	var parts: Array = []
+	var depth := 0
+	var start := -1
+	for i in value.length():
+		var c := value.unicode_at(i)
+		if c == 40:
+			depth += 1
+		elif c == 41:
+			depth = maxi(0, depth - 1)
+		var space := depth == 0 and (c == 32 or c == 9 or c == 10 or c == 13 or c == 12)
+		if space:
+			if start >= 0:
+				parts.append(value.substr(start, i - start))
+				start = -1
+		elif start < 0:
+			start = i
+	if start >= 0:
+		parts.append(value.substr(start))
+	return parts
+
+
+## top, right, bottom, left from the CSS 1-to-4 value pattern.
+static func _box(values: Array) -> Variant:
+	if values.is_empty():
+		return null
+	var a = values[0]
+	var b = values[1] if values.size() > 1 else a
+	var c = values[2] if values.size() > 2 else a
+	var d = values[3] if values.size() > 3 else b
+	return [a, b, c, d]
+
+
+static var _re_number := RegEx.create_from_string("^-?(\\d+\\.?\\d*|\\.\\d+)$")
+
+
+static func _is_number(value: String) -> bool:
+	return _re_number.search(value) != null
+
+
+static func _expand_flex(values: Array) -> Array:
+	if values.is_empty():
+		return []
+	var a: String = values[0]
+	if a == "none":
+		return [["flex-grow", "0"], ["flex-shrink", "0"], ["flex-basis", "auto"]]
+	if a == "auto":
+		return [["flex-grow", "1"], ["flex-shrink", "1"], ["flex-basis", "auto"]]
+
+	if values.size() == 1:
+		if _is_number(a):
+			return [["flex-grow", a], ["flex-shrink", "1"], ["flex-basis", "0"]]
+		# Unity: `flex: <basis>` leaves flex-grow 0 (measured: uss-shorthand;
+		# CSS would grow 1).
+		return [["flex-grow", "0"], ["flex-shrink", "1"], ["flex-basis", a]]
+
+	var b: String = values[1]
+	if values.size() == 2:
+		if _is_number(b):
+			return [["flex-grow", a], ["flex-shrink", b], ["flex-basis", "0"]]
+		return [["flex-grow", a], ["flex-shrink", "1"], ["flex-basis", b]]
+
+	return [["flex-grow", a], ["flex-shrink", b], ["flex-basis", values[2]]]
+
+
+## One declaration -> the longhand declarations it stands for, as
+## [[property, value], ...]. Returns [[property, value]] unchanged for
+## anything it does not split.
+## A shorthand whose arity is outside its grammar (gap: 3+ values, box
+## shorthand: 5+ values, flex: 4+ values) is invalid at parse time: the
+## expansion is empty, so the declaration contributes nothing to the
+## cascade — an earlier valid declaration still wins. The resolver
+## diagnoses the empty expansion.
+static func expand_shorthand(property: String, value: String) -> Array:
+	if property == "all":
+		return _expand_all(value)
+	if property == "background-position":
+		return _expand_background_position(value)
+	if property == "-unity-background-scale-mode":
+		return _expand_scale_mode(value)
+	if property == "flex":
+		var flex_values := split_value(value)
+		if flex_values.size() > 3:
+			return []
+		return _expand_flex(flex_values)
+
+	# gap: <row-gap> [<column-gap>] — expanding here keeps cascade order
+	# honest: a later row-gap longhand beats an earlier gap shorthand and
+	# vice versa.
+	if property == "gap":
+		var parts := split_value(value)
+		if parts.is_empty():
+			return [[property, value]]
+		if parts.size() > 2:
+			return []
+		var col: String = parts[1] if parts.size() > 1 else parts[0]
+		return [["row-gap", parts[0]], ["column-gap", col]]
+
+	if property == "transition":
+		return _expand_transition(value)
+
+	# -unity-text-outline: <width> <color> (either order, either optional).
+	if property == "-unity-text-outline":
+		var w := ""
+		var c := ""
+		for part in split_value(value):
+			if w.is_empty() and (part.ends_with("px") or _is_number(part)):
+				w = part
+			elif c.is_empty():
+				c = part
+			else:
+				return []
+		var out_o: Array = []
+		if not w.is_empty():
+			out_o.append(["-unity-text-outline-width", w])
+		if not c.is_empty():
+			out_o.append(["-unity-text-outline-color", c])
+		return out_o
+
+	var targets = BOX_SHORTHANDS.get(property)
+	if targets == null:
+		return [[property, value]]
+
+	var split := split_value(value)
+	if split.size() > 4:
+		return []
+	var values := _box(split)
+	if values == null:
+		return [[property, value]]
+	var out: Array = []
+	for i in targets.size():
+		out.append([targets[i], values[i]])
+	return out
+
+
+# ---------------------------------------------------------------------------
+# Unity's reading of a declaration value (measured: uss-invalid,
+# uss-keywords-2, uss-keywords-3, uss-important, uss-text-inherit)
+# ---------------------------------------------------------------------------
+
+## Keyword properties: the keywords Unity reads, first the one of enum
+## index 0. A value Unity cannot read as one of them reads as index 0 (and
+## still wins the cascade): `align-items: bogus` is `auto`, `flex-direction:
+## inherit` is `column`.
+const ENUM_VALUES := {
+	"align-items": ["auto", "flex-start", "center", "flex-end", "stretch"],
+	"align-self": ["auto", "flex-start", "center", "flex-end", "stretch"],
+	"align-content": ["auto", "flex-start", "center", "flex-end", "stretch"],
+	"justify-content": ["flex-start", "center", "flex-end", "space-between", "space-around", "space-evenly"],
+	"flex-direction": ["column", "column-reverse", "row", "row-reverse"],
+	"flex-wrap": ["nowrap", "wrap", "wrap-reverse"],
+	"position": ["relative", "absolute"],
+	"display": ["flex", "none"],
+	"visibility": ["visible", "hidden"],
+	"overflow": ["visible", "hidden", "scroll"],
+	"white-space": ["normal", "nowrap", "pre", "pre-wrap"],
+	"text-overflow": ["clip", "ellipsis"],
+	"-unity-text-overflow-position": ["end", "start", "middle"],
+	"-unity-overflow-clip-box": ["padding-box", "content-box"],
+	"-unity-font-style": ["normal", "bold", "italic", "bold-and-italic"],
+	"-unity-text-align": ["upper-left", "upper-center", "upper-right", "middle-left",
+		"middle-center", "middle-right", "lower-left", "lower-center", "lower-right"],
+	"-unity-slice-type": ["sliced", "tiled"],
+	"-unity-text-generator": ["standard", "advanced"],
+	"-unity-editor-text-rendering-mode": ["sdf", "bitmap"],
+}
+## Lengths (StyleLength / Length): an unreadable value is 0px.
+const LENGTH_PROPS := {
+	"width": true, "height": true, "min-width": true, "min-height": true,
+	"max-width": true, "max-height": true, "flex-basis": true,
+	"top": true, "right": true, "bottom": true, "left": true,
+	"margin-top": true, "margin-right": true, "margin-bottom": true, "margin-left": true,
+	"padding-top": true, "padding-right": true, "padding-bottom": true, "padding-left": true,
+	"border-top-left-radius": true, "border-top-right-radius": true,
+	"border-bottom-right-radius": true, "border-bottom-left-radius": true,
+	"font-size": true,
+}
+## Lengths Unity keeps only the number of: `letter-spacing: 10%` resolves
+## to 10 (px).
+const NUMBER_LENGTH_PROPS := {
+	"letter-spacing": true, "word-spacing": true, "-unity-paragraph-spacing": true,
+	"-unity-slice-scale": true,
+}
+## Numbers (StyleFloat / StyleInt): an unreadable value is 0.
+const NUMBER_PROPS := {
+	"flex-grow": true, "flex-shrink": true, "opacity": true,
+	"border-top-width": true, "border-right-width": true,
+	"border-bottom-width": true, "border-left-width": true,
+	"-unity-text-outline-width": true,
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+}
+## Colors: an unreadable value is transparent black.
+const COLOR_PROPS := {
+	"color": true, "background-color": true, "-unity-background-image-tint-color": true,
+	"border-top-color": true, "border-right-color": true,
+	"border-bottom-color": true, "border-left-color": true,
+	"-unity-text-outline-color": true,
+}
+const ZERO_COLOR := "rgba(0, 0, 0, 0)"
+
+static var _re_important := RegEx.create_from_string("\\s*!\\s*important\\s*$")
+
+
+## A declaration value without a trailing `!important`: Unity parses the
+## flag and ignores it (no precedence boost; measured, uss-important).
+static func strip_important(value: String) -> String:
+	if value.find("!") < 0:
+		return value
+	return _re_important.sub(value, "")
+
+
+## The value Unity reads for a longhand declaration: the value itself when
+## Unity can read it, otherwise the zero value of the property's type (enum
+## index 0, 0px, 0, transparent). `initial` and `unset` are keywords Unity
+## handles; `inherit` is not (it reads as the zero value). Returns the
+## value unchanged for every other property.
+static func unity_value(prop: String, value: String) -> String:
+	var v := value.strip_edges()
+	var lv := v.to_lower()
+	if lv == "initial" or lv == "unset":
+		return lv
+	var kw = ENUM_VALUES.get(prop)
+	if kw != null:
+		if (kw as Array).has(lv):
+			return lv
+		return kw[0]
+	if LENGTH_PROPS.has(prop):
+		if lv == "auto" or lv == "none":
+			return lv
+		var l := UssValues.parse_length(v)
+		return v if (l["kind"] == "px" or l["kind"] == "percent") else "0px"
+	if NUMBER_LENGTH_PROPS.has(prop):
+		# A percentage stays as written (Unity's computed value); readers
+		# take its number as px.
+		var l2 := UssValues.parse_length(v)
+		return v if (l2["kind"] == "px" or l2["kind"] == "percent") else "0px"
+	if prop == "translate":
+		return v if (lv == "none" or UssValues.parse_translate(v)["ok"]) else "0px 0px"
+	if NUMBER_PROPS.has(prop):
+		if not is_nan(UssValues.parse_number(v)):
+			return v
+		var l3 := UssValues.parse_length(v)
+		return v if l3["kind"] == "px" else "0"
+	if COLOR_PROPS.has(prop):
+		return v if UssValues.parse_color(v)["ok"] else ZERO_COLOR
+	return value
+
+
+## Why Unity cannot read a longhand value ("" when it can), for the parse
+## diagnostic that stands for Unity's import warning.
+static func unity_problem(prop: String, value: String) -> String:
+	var v := value.strip_edges()
+	if v.find("var(") >= 0:
+		return ""
+	var lv := v.to_lower()
+	# Values Unity's importer warns about but still reads (measured:
+	# uss-slice, uss-text-inherit).
+	if prop.begins_with("-unity-slice-") and prop != "-unity-slice-scale" and prop != "-unity-slice-type":
+		if lv != "initial" and lv != "unset" and not v.is_valid_int():
+			return '%s: Unity expects an integer, found "%s"; it reads %d' % [prop, v, int(UssValues.parse_length(v).get("value", 0.0))]
+	if NUMBER_LENGTH_PROPS.has(prop) and lv != "initial" and lv != "unset":
+		var l := UssValues.parse_length(v)
+		if l["kind"] == "percent" or (l["kind"] == "px" and not v.ends_with("px") and float(l["value"]) != 0.0):
+			return '%s: Unity expects a length, found "%s"; it reads %s px' % [prop, v, UssValues.fmt_number(float(l["value"]))]
+	var out := unity_value(prop, v)
+	if out == v or out == v.to_lower():
+		return ""
+	return '%s: Unity cannot read "%s"; it reads %s' % [prop, v, out]

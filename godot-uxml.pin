@@ -1,0 +1,7 @@
+# godot-uxml pin. Written by tools/update_godot_uxml.py. Do not edit.
+commit=0c8b6cd2c665306665ceb0a2a802b019277150c8
+committed=2026-11-07T15:58:11+09:00
+source=https://github.com/jethac/godot-uxml.git
+synced=2026-11-07T08:30:36+00:00
+addon_files=203
+parity_cases=194
