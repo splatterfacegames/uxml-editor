@@ -86,22 +86,26 @@ and `replace_source()` (R4). The library reads `UxmlControls.catalog()`
 (R9); drag and drop uses the collection drag of godot-uxml (R12). No code
 reads a private field of godot-uxml or copies its code.
 
-`bench/frame_cost.gd`, median of 3 runs per path (ms per frame; before
--> after the re-pin):
+`bench/frame_cost.gd`, median of 3 runs per path, in ms per frame:
+before the re-pin -> after the re-pin -> with milestone 4 (`12ac74c`).
 
 | Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
 | --- | --- | --- | --- | --- |
-| selection | 12.5 -> 10.5 | 21.9 -> 20.4 | 25.6 -> 22.3 | 155.7 -> 71.8 |
-| drag (move) | 14.6 -> 14.7 | 15.0 -> 18.7 | 76.3 -> 66.0 | 79.2 -> 44.3 |
-| hover canvas | 0.18 -> 0.16 | 0.16 -> 0.17 | 2.7 -> 1.5 | 3.0 -> 0.9 |
-| typing | 1.7 -> 1.6 | 1.6 -> 1.6 | 2.4 -> 2.1 | 3.2 -> 2.1 |
-| commit of typing (max frame) | 35-154 -> 31-86 | 75-155 -> 14-115 | 981-2045 -> 301-505 | 2238-33102 -> 830-950 |
-| idle | 0.02 -> 0.02 | 0.03 -> 0.02 | 0.04 -> 0.03 | 0.04 -> 0.03 |
+| selection | 12.5 -> 10.5 -> 9.3 | 21.9 -> 20.4 -> 15.5 | 25.6 -> 22.3 -> 18.2 | 155.7 -> 71.8 -> 79.2 |
+| drag (move) | 14.6 -> 14.7 -> 11.3 | 15.0 -> 18.7 -> 14.2 | 76.3 -> 66.0 -> 33.9 | 79.2 -> 44.3 -> 35.8 |
+| hover canvas | 0.18 -> 0.16 -> 0.10 | 0.16 -> 0.17 -> 0.10 | 2.7 -> 1.5 -> 0.8 | 3.0 -> 0.9 -> 0.8 |
+| typing | 1.7 -> 1.6 -> 0.9 | 1.6 -> 1.6 -> 0.9 | 2.4 -> 2.1 -> 1.1 | 3.2 -> 2.1 -> 1.2 |
+| commit of typing (max frame) | 35-154 -> 31-86 -> 31-37 | 75-155 -> 14-115 -> 68-76 | 981-2045 -> 301-505 -> 280-309 | 2238-33102 -> 830-950 -> 367-774 |
+| idle | 0.02 | 0.02-0.03 | 0.03-0.04 | 0.03-0.04 |
 
 The commit of a typing pause now goes through `replace_source()` instead
-of a full load. Other agents loaded the machine during the runs; the
-spread between runs is large (for example, selection on the large
-document, GDScript, 92-199 ms before).
+of a full load. Other agents loaded the machine during the runs, less so
+during the milestone 4 runs; the spread between runs is large (for
+example, selection on the large document, GDScript, 92-199 ms before).
+The first milestone 4 inspector cost 88 ms per selection on the menu
+fixture (GDScript): rows of the Classes section changed `display`, and
+a display change lays out the whole inspector. The rows now change
+`visibility` only.
 
 ## M4. Provenance inspector (done)
 

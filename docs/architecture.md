@@ -348,8 +348,12 @@ properties, pairs of extra rows, class rows and declaration rows) and
 then changes it in place for each selection: field values and
 placeholders go to the `LineEdit` controls, row names and declaration
 texts go to fixed-size `Label` and `Button` controls, unused rows of a
-shown block are `visibility: hidden`, and a block that is not in use is
-not displayed (so the Attributes section has no gap). A selection change
+shown block are `visibility: hidden`, and an extra block of attributes
+or style declarations that is not in use is not displayed (so the
+Attributes section has no gap; a change of the number of extra blocks
+costs one layout). The first class block and the declaration rows stay
+displayed: most selections change their content, and a display change
+lays out the whole inspector (about 90 ms on the GDScript path). A selection change
 then needs few restyles and seldom a layout (requests R15, R17 have the
 costs). The document tabs are a third,
 small godot-uxml document (`EdTabBar`), generated when the tabs change.
