@@ -12,277 +12,241 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 
 | ID | Priority | Status | Request |
 | --- | --- | --- | --- |
-| R1 | P1 | workaround | Load from text with a caller resolver |
-| R2 | P1 | workaround | Element-handle lookups |
-| R3 | P1 | relied on, untested upstream | Stable source offsets on `UxmlElement` |
-| R4 | P2 | patch for `style`/`class`, else full reload | Partial reload of one stylesheet or one document |
-| R5 | P2 | winner only | All cascade candidates of a property |
-| R6 | P2 | none | Forced pseudo-states on an element |
-| R7 | P2 | none | Transition snapshot and seek |
-| R8 | P2 | workaround (transforms applied) | Hit-test that respects transforms and clipping |
-| R9 | P2 | static table | Catalog of supported elements and attributes |
-| R10 | P3 | workaround | Template instance of a cloned element |
-| R11 | P3 | workaround (editor finds the end) | End offsets and a severity on every diagnostic |
-| R12 | P2 | workaround | Drag and drop for collection items |
-| R13 | P3 | bug | `background-image: none` on a checked ToolbarToggle |
-| R14 | P3 | workaround | Rectangle of an element in another element's space |
-| R15 | P2 | workaround (in-place updates) | Build cost of a document; text updates without a layout |
-| R16 | P3 | workaround | Context menu at a point, in the look of the owner document |
+| R1 | P1 | done in `6137987` | Load from text with a caller resolver |
+| R2 | P1 | done in `6137987` | Element-handle lookups |
+| R3 | P1 | done in `6137987` (documented, tested) | Stable source offsets on `UxmlElement` |
+| R4 | P2 | done in `6137987` | Partial reload of one stylesheet or one document |
+| R5 | P2 | done in `6137987` | All cascade candidates of a property |
+| R6 | P2 | done in `6137987` | Forced pseudo-states on an element |
+| R7 | P2 | done in `6137987` (not used yet: M6) | Transition snapshot and seek |
+| R8 | P2 | done in `6137987` | Hit-test that respects transforms and clipping |
+| R9 | P2 | done in `6137987` | Catalog of supported elements and attributes |
+| R10 | P3 | done in `6137987` | Template instance of a cloned element |
+| R11 | P3 | partly done: `end_offset` in `6137987`; severity open | End offsets and a severity on every diagnostic |
+| R12 | P2 | done in `6137987` | Drag and drop for collection items |
+| R13 | P3 | fixed in `6137987` | `background-image: none` on a checked ToolbarToggle |
+| R14 | P3 | done in `6137987` | Rectangle of an element in another element's space |
+| R15 | P2 | open (workaround: in-place updates) | Build cost of a document; text updates without a layout |
+| R16 | P3 | open (workaround) | Context menu at a point, in the look of the owner document |
+| R17 | P3 | open (workaround) | Value updates of field controls without a restyle |
 
-## R1. Load from text with a caller resolver (P1)
+The editor pins godot-uxml `6137987` (github.com/splatterfacegames/godot-uxml),
+which has R1-R14. The sections of the done requests give the final API
+and where the editor uses it. The open requests keep their workaround
+notes.
+
+## R1. Load from text with a caller resolver (P1, done)
 
 ```gdscript
 # UxmlDocument
 func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxml",
 		root: String = "", resolver: UxmlResourceResolver = null) -> int
+func load_document(path: String, root: String = "", resolver: UxmlResourceResolver = null) -> int
 ```
 
-`resolver == null` keeps the current behaviour. Otherwise the load uses
-`resolver` for every `<Style src>`, `@import`, template and asset read, and
-`root` is ignored. `reload()` must keep the resolver of the last load.
+With a resolver, the load reads every file through it and `root` is not
+used. `reload()`, `replace_source()` and `reload_stylesheet()` keep the
+resolver.
 
-**Use case.** The canvas shows unsaved text. The editor subclasses
-`UxmlResourceResolver` (`EdBufferResolver`) and returns open buffers from
-`resolve_text()`. Edited USS, `@import` targets and template files then
-render before a save.
+**Editor use.** `EdRenderHost.render()` passes `EdBufferResolver`; the
+host updates the overrides of the resolver before each partial update.
+The copy of the body of `load_source()` is gone.
 
-**Workaround.** `EdRenderHost._load_source()` copies the body of
-`load_source()` at the pinned commit and sets `_resolver`, `_doc` and
-`_effective_root` directly. Any change to `load_source()` upstream breaks
-the copy without an error.
-
-## R2. Element-handle lookups (P1)
+## R2. Element-handle lookups (P1, done)
 
 ```gdscript
 # UxmlDocument
 func get_document_model() -> UxmlDocumentModel
-func get_control_for(element: UxmlElement) -> Control        # outer box
-func get_native_for(element: UxmlElement) -> Control         # interactive native
-func get_element_for(control: Control) -> UxmlElement        # inverse, any part control
+func get_control_for(element: UxmlElement) -> Control
+func get_native_for(element: UxmlElement) -> Control
+func get_element_for(control: Control) -> UxmlElement   # can be a part: follow part_of
 func get_parent_element(element: UxmlElement) -> UxmlElement
 func get_computed_style_for(element: UxmlElement) -> Dictionary
 func set_element_state_for(element: UxmlElement, state: String, on: bool) -> void
 ```
 
-**Use case.** Most authored elements have no `name`. The editor maps
-every authored element to its control (selection overlay, hit-test,
-layout readout) and reads the computed style of the selection.
+**Editor use.** `EdRenderHost` (element map, controls, computed style,
+parents). No private field of godot-uxml is read.
 
-**Workaround.** `EdRenderHost` reads `_doc`, `_controls`, `_parents` and
-`_styles`.
+## R3. Stable source offsets on `UxmlElement` (P1, done)
 
-## R3. Stable source offsets on `UxmlElement` (P1)
+godot-uxml documents and tests the offsets (design.md, "Source offsets
+(contract)"). Differences from the request:
 
-Document as API, and test upstream:
+- a template clone carries the offsets of the **outermost `<Instance>`**
+  of the entry file, not offsets in the template file;
+  `UxmlDocumentModel.source_offset_of(el)` gives the offset in the
+  template file and `path_of(el)` the file;
+- a control part carries the offsets of its control element.
 
-- `UxmlElement.open_tag_start` is the String index of the `<` of the open
-  tag in the source text of the file the element was authored in.
-- `open_tag_end` is past `>` or `/>`; `source_end` is past the close tag.
-- `attributes[i].offset` is the index of the attribute name.
-- Both parsers (native and GDScript) give the same values.
+**Editor use.** `EdRenderHost._map()` skips parts and clones
+(`instance_of(el) != null`), so a clone never maps to the `<Instance>` by
+offset; `node_of()` maps a clone to its instance. `<Instance>` elements
+are `TemplateContainer` in the model and map by offset.
+`tests/unit/test_source_parsers.gd` still checks both parsers.
 
-Optional addition: `UxmlElement.source_file: String` (today
-`UxmlDocumentModel.path_of(element)`).
-
-**Use case.** The editor maps rendered elements to its own span tree by
-`open_tag_start`. `tests/unit/test_source_parsers.gd` checks the
-agreement for all 144 UXML fixtures on both godot-uxml paths, but godot-uxml
-does not promise the contract.
-
-## R4. Partial reload (P2)
+## R4. Partial reload (P2, done)
 
 ```gdscript
 # UxmlDocument
-## Re-parse one stylesheet that the document uses and restyle. Returns OK,
-## or ERR_DOES_NOT_EXIST when no sheet of the document has that origin.
-func reload_stylesheet(origin: String, text: String) -> int
-## Replace the document text. Elements whose (path, open_tag_start, tag)
-## survive keep their controls, view data, focus and running transitions.
+func reload_stylesheet(origin: String, text: String) -> int    # OK, ERR_DOES_NOT_EXIST
 func replace_source(uxml: String) -> int
+func get_last_replace_mode() -> String                         # "in-place" or "reload"
+signal source_replaced(in_place)
 ```
 
-**Use case.** Every edit re-renders the whole document (`render()`), and
-typing in the source view re-renders at each pause. The full reload costs
-10-600 ms on the fixtures and resets scroll offsets, focus and
-transitions. A USS edit only needs a restyle; an attribute edit only needs
-`UxmlElement.set_attribute()` on the matching element.
+`replace_source()` edits in place only when the element trees match and
+only `class` and `style` values (or white space and comments) differ;
+otherwise it loads again and moves the view state, the focus and the
+forced states to the elements with the same name or tree position.
 
-**Workaround (2026-11-07).** `EdRenderHost.patch()` handles the common
-case: when the only change of the entry buffer is the value of a `style`
-or `class` attribute of rendered elements (or such an attribute added or
-removed), the new values go to the godot-uxml model through
-`UxmlElement.set_attribute()` and the document restyles itself. Canvas
-drags, nudges and inline style edits take this path. Measured with
-`bench/frame_cost.gd`: a move step on a 507-element document costs about
-25 ms (restyle and layout) instead of about 850 ms (full reload), native
-path. A USS edit, a structure edit or another attribute still reloads the
-whole document.
+**Editor use.** `EdRenderHost.update()`: a changed stylesheet goes to
+`reload_stylesheet()`, a changed entry or template to `replace_source()`.
+The skeleton comparison and the model patch of the editor are gone.
+Measured with `bench/frame_cost.gd` (3 runs each): the commit of a typing
+pause on the 507-element document costs 300-500 ms (native) and 830-950
+ms (GDScript) instead of 980-2040 ms and 2240-33100 ms.
 
-## R5. All cascade candidates of a property (P2)
+## R5. All cascade candidates of a property (P2, done)
 
 ```gdscript
 # UxmlDocument
-## Every declaration of `property` that matches `element`, winner first:
-## [{value, winner: bool, rank: "theme"|"author"|"inline",
-##   specificity: Vector3i, order: int,
-##   origin: {kind: "rule", file, sheet, item, decl_index} | {kind: "inline", decl_index}
-##         | {kind: "inherited", from: UxmlElement, origin} | {kind: "default"}}]
-## `states` forces pseudo-states for the query only ({"hover": true}).
 func explain_style(element: UxmlElement, property: String, states: Dictionary = {}) -> Array
 ```
 
-**Use case.** The provenance inspector shows which rule a value comes from,
-the rules it overrides, and offers each authored rule as a write target
-(`docs/adr/0004-style-write-targets.md`). The computed style already gives
-the winning origin (`{kind: "rule", file, sheet, item, decl_index}`); the
-editor maps `item` and `decl_index` to exact spans with `EdUssSource`. The
-losing candidates and the specificity are not exposed.
+Each entry, winner first: `value`, `property` (the shorthand name when a
+shorthand gave the value), `declared` (as written), `winner`, `status`
+(`winner`, `overridden`, `dropped`, `keyword`, `inherited`, `default`),
+`rank`, `specificity`, `order`, `origin` (`{kind: "rule", sheet, item,
+decl_index, file[, states]}`, `{kind: "inline", decl_index}`, `{kind:
+"inherited", from, origin}`, `{kind: "default"}`). The query takes a
+longhand.
 
-Please also document the `inline` origin shape and the shorthand case (a
-longhand that comes from a `margin` declaration).
+**Editor use.** `EdRenderHost.explain()` normalizes the origins;
+`EdProvenance` makes the declaration list, `EdStyleTargets` the write
+targets of ADR 0004, and the class editor checks which rules of a class
+apply.
 
-## R6. Forced pseudo-states (P2)
+## R6. Forced pseudo-states (P2, done)
 
 ```gdscript
 # UxmlDocument
-## States that stay on until cleared, whatever the input does. Transitions
-## run as for a real state change.
 func set_forced_states(element: UxmlElement, states: PackedStringArray) -> void
 func get_forced_states(element: UxmlElement) -> PackedStringArray
 func clear_forced_states() -> void
 ```
 
-**Use case.** State preview (`:hover`, `:active`, `:focus`, `:checked`,
-`:disabled`) on the canvas without the pointer, and the state-machine
-panel. `set_element_state()` works by name, and the next real
-`mouse_exited` clears the state.
+States: hover, active, focus, checked, selected, disabled, enabled.
 
-## R7. Transition snapshot and seek (P2)
+**Editor use.** The state preview of the inspector
+(`EdRenderHost.set_forced()`). The host keeps the states by editor node
+id and sets them again after a full load.
+
+## R7. Transition snapshot and seek (P2, done; not used yet)
 
 ```gdscript
 # UxmlDocument (with transitions_manual = true)
-## Every running or pending transition:
-## [{element: UxmlElement, property, from, to, start_time, delay, duration,
-##   easing, elapsed}]
-func get_transitions() -> Array
-## Set every running transition to `seconds` after its start (scrub). Does
-## not emit transition_end until playback passes the end.
+func get_transitions() -> Array          # entries also have `value` and `progress`
 func seek_transitions(seconds: float) -> void
+func get_transition_clock() -> float
 ```
 
-**Use case.** The transition timeline (old roadmap issues #6-#11) shows
-the tracks of a state change and scrubs them. `advance_transitions()`
-only moves forward.
+**Editor use.** None yet; the transition timeline is milestone 6.
 
-## R8. Hit-test (P2)
+## R8. Hit-test (P2, done)
 
 ```gdscript
 # UxmlDocument
-## The deepest element at `point` (document coordinates). Applies
-## transforms (rotate, scale, translate), overflow clipping and, when
-## `respect_picking` is true, picking-mode.
-func element_at(point: Vector2, respect_picking: bool = false) -> UxmlElement
+func element_at(point: Vector2, respect_picking: bool = false, include_parts: bool = false) -> UxmlElement
 ```
 
-**Use case.** Canvas selection, drop targets. **Workaround.**
-`EdRenderHost.hit_test()` tests the point in the local space of each
-control and of every clipping ancestor (`get_global_transform()`), so
-rotate, scale and translate apply because godot-uxml sets them on the
-Control transform. `picking-mode` is not applied (the editor selects what
-the author wrote). The workaround depends on the private `_controls` and
-`_parents` maps (R2).
+A hit on a part gives its control element unless `include_parts`; null
+when only the root is hit.
 
-## R9. Catalog of supported elements (P2)
+**Editor use.** `EdRenderHost.hit_test()` (`respect_picking = false`: the
+editor selects what the author wrote). A hit on template content selects
+the `<Instance>`.
+
+## R9. Catalog of supported elements (P2, done)
 
 ```gdscript
 # UxmlControls (static)
-## [{namespace: "UnityEngine.UIElements" | "UnityEditor.UIElements",
-##   name, container: bool, attributes: [{name, type, default}], editor_only: bool}]
-static func catalog() -> Array
+static func catalog() -> Array          # {namespace, name, container, editor_only, uxml_object,
+                                        #  attributes: [{name, type, default[, choices]}]}
+static func describe(element_name: String) -> Dictionary
 ```
 
-**Use case.** The palette lists every element that godot-uxml supports,
-and the inspector offers the attributes of the selected control.
+**Editor use.** `EdElementCatalog.entries()` reads the catalog (without
+UxmlObjects and `TemplateContainer`); the editor keeps only the library
+groups, the order and the attributes of a new element. The inspector
+shows enum choices and defaults of unset attributes, and the attribute
+menu lists the catalog attributes of the element.
 
-**Workaround.** `src/core/element_catalog.gd` (`EdElementCatalog`) is a
-static table with the namespace, the library group, a container flag and
-the default attributes of a new element. `tests/unit/test_structure_commands.gd`
-compares it with `UssControls.IMPLICIT_CLASSES` and renders every entry.
-Please add `container: bool` (the element takes authored children) and,
-per attribute, an `enum` value list; the palette and the inspector need
-both. To adopt R9, make `EdElementCatalog.entries()` read the catalog.
-
-## R10. Template instance of a cloned element (P3)
+## R10. Template instance of a cloned element (P3, done)
 
 ```gdscript
 # UxmlDocumentModel
-## The <Instance> (TemplateContainer) element whose expansion made
-## `element`, or null for an element of the entry file.
-func instance_of(element: UxmlElement) -> UxmlElement
+func instance_of(element: UxmlElement) -> UxmlElement   # innermost; call again for outer ones
+func source_offset_of(element: UxmlElement) -> int
+func path_of(element: UxmlElement) -> String
 ```
 
-**Use case.** A click on template content selects the instance in the
-entry document. **Workaround.** Walk `_parents` up to the first element
-that is not in `element_paths`.
+**Editor use.** `EdRenderHost.node_of()` walks `instance_of()` to the
+instance of the entry file.
 
-## R12. Drag and drop for collection items (P2)
+## R12. Drag and drop for collection items (P2, done)
 
 ```gdscript
 # UxmlDocument
-## A drag of selected items started (Unity CanStartDrag / SetupDragAndDrop).
-signal items_drag_started(element_name, indices, global_position)
-## The visible item index and its global rectangle at a point, or -1.
+func set_drag_and_drop(list_name: String, callbacks: Dictionary) -> int
+	# {can_start_drag, setup_drag_and_drop, drag_and_drop_update, handle_drop}
 func get_item_index_at(list_name: String, global_point: Vector2) -> int
 func get_item_rect(list_name: String, index: int) -> Rect2
+func get_drag() -> Dictionary
+func cancel_drag() -> void
+signal items_drag_started(element_name, indices, global_position)
+signal items_drag_updated(element_name, global_position, target)
+signal items_drag_ended(element_name, global_position, result)   # dropped, rejected, outside, canceled
 ```
 
-**Use case.** The library and the hierarchy start drags; the hierarchy is
-also a drop target (before, into, after a row).
+An `"outside"` result (target `{}`) is a drop outside every collection
+of the document. A reorderable TreeView now reports
+`item_index_changed(element_name, id, parent_id)`.
 
-**Workaround.** `EdDragController` watches the raw mouse events of the
-window, finds rows with `get_list_rows()` and `UxmlListRow.get_element()`
-(public), and draws its own drag label and drop line. A `reorderable`
-list moves items itself; the editor does not set `reorderable`.
+**Editor use.** `EdDragController` gives the library and the hierarchy
+the four callbacks; the canvas takes `"outside"` drops. The raw mouse
+watch and the `get_list_rows()` row search are gone. The editor does not
+set `reorderable`.
 
-## R13. `background-image: none` on a checked ToolbarToggle (P3, bug)
+## R13. `background-image: none` on a checked ToolbarToggle (P3, fixed)
 
-A `uie:ToolbarToggle` with `value="true"` in the editor dark skin reports
-`missing-file: background-image "none" resolved to
-res://addons/godot_uxml/themes/none but is not a readable image` (the
-theme sheets set `background-image: none`, for example
-`unity-editor-dark.uss` line 421). `none` is a keyword, not a path.
-The editor shell shows the warning for its Snap toggle.
+Fixed in `6137987`: `none` is a keyword, also in the checked state. The
+Snap toggle of the editor shell no longer reports `missing-file`.
 
-## R14. Rectangle of an element in another element's space (P3)
+## R14. Rectangle of an element in another element's space (P3, done)
 
 ```gdscript
 # UxmlDocument
-## The border box of `element` in the coordinates of `space` (null: the
-## document), as Unity WorldToLocal / ChangeCoordinatesTo.
-func get_element_rect(element: UxmlElement, space: UxmlElement = null) -> Rect2
+func get_element_rect(element: UxmlElement, space: UxmlElement = null, box: String = "border") -> Rect2
+	# box: "border", "padding" or "content"; transforms applied (bounding box)
+func get_element_transform(element: UxmlElement, space: UxmlElement = null) -> Transform2D
 ```
 
-**Use case.** Snap targets, drop indicators and the absolute `left`/`top`
-fallback need the rectangles of the parent, the siblings and the
-children, and the parent border. **Workaround.** `EdRenderHost.rect_of()`
-reads `Control.get_global_rect()` of the private control map (R2), and
-`border_start()` reads the computed border widths.
+**Editor use.** `EdRenderHost.rect_of()` (selection, snapping, drop
+targets), `border_start()` (the padding box in the element's own space;
+the computed-border workaround is gone) and `local_box_of()` (the canvas
+draws the rotated outline of a transformed element).
 
-## R11. End offsets and a severity on every diagnostic (P3)
+## R11. End offsets and a severity on every diagnostic (P3, partly done)
 
-Every diagnostic gets `end_offset` (parser warnings have one today; cascade
-and runtime diagnostics do not) and `severity` ("error", "warning",
-"info").
+Done in `6137987`: every diagnostic has `end_offset`. Open: a `severity`
+("error", "warning", "info") on each diagnostic.
 
-**Use case.** The diagnostics panel selects the exact range in the source
-view and filters by severity.
-
-**Workaround.** `EdDiagnostics.range_end()` finds the end: the open tag of
-an element that starts at the offset, the attribute that holds the offset,
-or the token. `EdDiagnostics.severity_of()` maps the kinds: `malformed`,
-`import-*`, `missing-file`, `path-outside-root`, `malformed-reference` and
-`template-*` are errors, `version-dependent` is info, the others are
-warnings.
+**Workaround (severity).** `EdDiagnostics.severity_of()` maps the kinds:
+`malformed`, `import-*`, `missing-file`, `path-outside-root`,
+`malformed-reference` and `template-*` are errors, `version-dependent` is
+info, the others are warnings. `EdDiagnostics.range_end()` stays as the
+fallback for a diagnostic without `end_offset`.
 
 ## R15. Build cost of a document; text updates without a layout (P2)
 
@@ -339,3 +303,23 @@ pointer (its width sets the menu width). The menu takes the theme path of
 the shell document but not its editor theme and skin, so it has the
 runtime look in the editor window (the same as the menus of `ToolbarMenu`
 elements).
+
+## R17. Value updates of field controls without a restyle (P3)
+
+```gdscript
+# UxmlDocument
+## Set the value of a field (TextField, Toggle, DropdownField, ColorField,
+## ...) as the user would, without a change notification and without a
+## restyle when the size of the control does not change.
+func set_field_value(element_name: String, value: Variant, notify: bool = false) -> void
+```
+
+**Use case.** The inspector shows the value of every row for each
+selection. A model `value` change restyles the field (about 4 ms native,
+70 ms GDScript, see R15), so the typed helpers of the inspector are
+buttons with menus, not DropdownFields with the current value, and the
+colour swatch is a tinted button.
+
+**Workaround.** Text values go to the `LineEdit` controls (`EdUi`);
+Toggle values (the state preview) go through the model; the colour
+swatch is the `self_modulate` of a Button control.

@@ -79,11 +79,14 @@ static func row(session: EdDocumentSession, node: EdUxmlNode, e: Dictionary) -> 
 	return r
 
 
-## One line of text for row `r`: the status, the value and the origin.
-static func line(r: Dictionary) -> String:
+## One line of text for row `r`: the status, the origin and the value
+## (the origin first: the inspector is narrow). `queried`: the longhand of
+## the query; a declaration of another property (a shorthand) shows its
+## name.
+static func line(r: Dictionary, queried: String = "") -> String:
 	var v: String = r["declared"] if not String(r["declared"]).is_empty() else r["value"]
-	var prop: String = "" if r["property"].is_empty() else r["property"] + ": "
-	return "%-10s %s%s   ← %s" % [r["status"], prop, v, r["where"]]
+	var prop: String = "" if r["property"].is_empty() or r["property"] == queried else r["property"] + ": "
+	return "%s  %s  =  %s%s" % [r["status"], r["where"], prop, v]
 
 
 static func _text(v: Variant) -> String:

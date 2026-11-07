@@ -21,6 +21,42 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Added (Godot rebuild, milestone 4)
+
+- Provenance inspector: the declarations of the focused style property
+  from godot-uxml `explain_style` (status, value, file and line) with a
+  jump to the source.
+- Style write targets after ADR 0004: the authored rules that apply,
+  the inline style, or a new `#name` or `.class` rule; a picker when
+  more than one target is valid; stale choices are refused.
+- Typed style fields: a value check per USS property type and helper
+  buttons (keyword menu from godot-uxml, unit menu, colour picker, asset
+  menu with project path validation).
+- Class editor: add and remove classes with exact patches, and the rules
+  of each class with a mark for the rules that apply.
+- State preview: `:hover`, `:active`, `:focus`, `:checked`, `:selected`
+  and `:disabled` forced on the selection (godot-uxml forced states).
+- Attribute hints and an attribute menu from the godot-uxml catalog; the
+  Attributes section has no gap from spare rows.
+- Tests: 21 new tests (181 in total, 1781 checks) on both godot-uxml
+  paths; screenshots `docs/screenshots/m4-*.png`.
+
+### Changed (Godot rebuild, godot-uxml 6137987)
+
+- godot-uxml is pinned at `6137987` (github.com/splatterfacegames/godot-uxml),
+  with the editor APIs R1-R14. Every workaround that read private fields
+  of godot-uxml or copied its code is gone: loads with the buffer
+  resolver, element handles, `element_at`, `get_element_rect`,
+  `UxmlControls.catalog()`, the collection drag and drop, and partial
+  updates with `reload_stylesheet` and `replace_source`.
+- A USS edit restyles the canvas without a full load; the commit of a
+  typing pause on a 507-element document costs about 300-500 ms (native)
+  instead of 1-2 s.
+- An `<Instance>` element maps to its rendered TemplateContainer: a click
+  on template content selects the instance.
+- The canvas draws the outline of a rotated or scaled element along its
+  transform.
+
 ### Added (Godot rebuild, milestone 5)
 
 - Diagnostics panel: godot-uxml diagnostics of every open document, the

@@ -20,10 +20,11 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                canvas_view.gd     SubViewport, pan/zoom, overlay,    │
 │                                   handles, guides, preview input     │
 │                layout_controller  canvas gestures -> layout writes   │
-│                drag_controller    drag and drop between the views    │
+│                drag_controller    drag and drop (godot-uxml R12)     │
 │                palette_view.gd    the library TreeView               │
 │                source_view.gd     CodeEdit, LF display copy          │
-│                inspector_view.gd  godot-uxml document, in place      │
+│                inspector_view.gd  provenance inspector: states,      │
+│                                   classes, typed fields, targets     │
 │                tab_bar.gd         document tabs (godot-uxml)         │
 │                diagnostics.gd     diagnostics entries and filters    │
 │                ui_util.gd         label and model updates without a  │
@@ -32,9 +33,9 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                ui/*.uxml, *.uss   the window, authored in UXML       │
 ├───────────────────────────────────────────────────────────────────────┤
 │ src/render/    godot-uxml as the renderer                            │
-│                render_host.gd     render from buffers, patch of      │
-│                                   style/class, element map, hit-test,│
-│                                   computed style                     │
+│                render_host.gd     render from buffers, partial       │
+│                                   updates, element map, hit-test,    │
+│                                   provenance, forced states          │
 │                buffer_resolver.gd unsaved buffers override disk      │
 ├───────────────────────────────────────────────────────────────────────┤
 │ src/core/      Source-backed editing (no Godot UI, headless-tested)  │
@@ -48,7 +49,12 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 │                layout_commands.gd move/resize/nudge as style writes  │
 │                snap.gd            snapping geometry                  │
 │                step_composer.gd   several steps -> one transaction   │
-│                element_catalog.gd library elements (request R9 seam) │
+│                element_catalog.gd library: godot-uxml catalog (R9)   │
+│                                   with groups and new-element attrs  │
+│                style_types.gd     USS value kinds, checks, helpers   │
+│                style_targets.gd   write targets (ADR 0004)           │
+│                provenance.gd      declaration rows, class rules,     │
+│                                   class edits                        │
 │                uss_commands.gd    rule and inline declaration edits  │
 │                workspace.gd       buffers + one EdCommandHistory     │
 │                project_store.gd   enumerate, read, revision-checked  │
@@ -60,9 +66,12 @@ The previous editor (React, Tauri, a vendored `uxml-preview` engine) is on
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-`src/core` does not use `src/app`, `src/render` or godot-uxml. The span
-parsers are the editor's own code (see "Two parsers, one identity"), so
-the core also runs where the addon is not loaded.
+`src/core` does not use `src/app`, `src/render` or godot-uxml at compile
+time. The span parsers are the editor's own code (see "Two parsers, one
+identity"). `EdElementCatalog` and `EdStyleTypes` read the godot-uxml
+tables (`UxmlControls.catalog()`, `UssProperties.ENUM_VALUES`) through a
+`Callable` seam that loads the addon script by path, so the core also
+loads where the addon is not present.
 
 ## Source fidelity is the invariant
 
@@ -104,37 +113,48 @@ trees contain the same elements and both sheets the same items:
 
 `tests/unit/test_source_parsers.gd` checks both statements for every
 fixture (144 UXML, 67 USS) on the native and the GDScript paths of
-godot-uxml. godot-uxml request R3 asks to make the offsets a documented
-contract.
+godot-uxml. godot-uxml documents and tests the offsets (request R3).
+Control parts carry the offsets of their control, and template clones
+carry the offsets of the outermost `<Instance>` of the entry file; the
+element map skips both.
 
 ## Rendering
 
-`EdRenderHost` is a `SubViewport` with one `UxmlDocument`. `render()`:
+`EdRenderHost` is a `SubViewport` with one `UxmlDocument`. Every call goes
+through the public editor APIs of godot-uxml (pin `6137987`); no private
+field is read.
 
-1. makes an `EdBufferResolver` that returns the text of open buffers for
-   any `<Style src>`, `@import` or template path, and reads other files
-   (images, fonts) from disk;
-2. loads the entry buffer text through godot-uxml (request R1: the host
-   copies the body of `UxmlDocument.load_source()` to pass the resolver);
-3. maps each authored element of the entry file to its `UxmlElement` by
-   open tag offset. Control parts (`part_of`) and template clones
-   (`element_paths`) are not authored in the entry file and stay unmapped.
+1. `render()` makes an `EdBufferResolver` that returns the text of open
+   buffers for any `<Style src>`, `@import` or template path, and reads
+   other files (images, fonts) from disk, and loads the entry text with
+   `load_source(text, path, "", resolver)` (request R1).
+2. `update()` brings the render up to date after an edit without a full
+   load where godot-uxml can (request R4): a changed stylesheet goes to
+   `reload_stylesheet()` (the controls stay), a changed entry or template
+   to `replace_source()`. `replace_source()` edits in place when the
+   element trees match and only `class` or `style` changed (canvas drags,
+   nudges, inline style and class edits); otherwise it loads again and
+   keeps the view state. A new buffer, another theme or another document
+   needs `render()`.
+3. After each load or update, the host maps each authored element of the
+   entry file to its `UxmlElement` by open tag offset. Control parts
+   (`part_of`) and template clones (`UxmlDocumentModel.instance_of()`,
+   request R10) are not authored in the entry file and stay unmapped;
+   `node_of()` maps them to their control element or their `<Instance>`.
+   An `<Instance>` is a `TemplateContainer` in the model.
 
-`hit_test()` returns the deepest mapped element whose control rectangle,
-cut by clipping ancestors, holds the point (request R8). `computed_style()`
-returns the godot-uxml cascade output, with the winning origin of each
-property (request R2 for the lookup).
+Lookups:
 
-A change of the entry buffer that only changes the value of `style` or
-`class` attributes of rendered elements (or adds or removes such an
-attribute) does not reload: `patch()` gives the new values to the
-godot-uxml model (`UxmlElement.set_attribute()`), and godot-uxml restyles
-those elements. The check compares the source without those attributes
-(the skeleton) with the source of the last render; the same skeleton means
-the same structure, so the element map stays valid. Canvas drags, nudges
-and inline style edits take this path. Every other change renders the
-whole document again (request R4 asks for a partial reload). The theme menu selects Unity's choice (auto), the
-runtime theme, or the editor dark or light skin.
+| Call | godot-uxml API |
+| --- | --- |
+| `control_of()`, `computed_style()`, `parent_id()` | `get_control_for`, `get_computed_style_for`, `get_parent_element` (R2) |
+| `rect_of()`, `border_start()`, `local_box_of()` | `get_element_rect` (border, padding, content box) and `get_element_transform` (R14) |
+| `hit_test()` | `element_at(point)` (R8): transforms and clipping apply, `picking-mode` does not (the editor selects what the author wrote) |
+| `explain()` | `explain_style` (R5), origins normalized to workspace paths |
+| `set_forced()` | `set_forced_states` (R6); the host keeps the states by node id and sets them again after a full load |
+
+The theme menu selects Unity's choice (auto), the runtime theme, or the
+editor dark or light skin.
 
 ## One history
 
@@ -176,12 +196,13 @@ workspace.
 
 ## Structure editing
 
-- **Library.** `EdElementCatalog` lists every element that godot-uxml
-  renders, with its namespace, its group and the default attributes of a
-  new element. The table is a seam for request R9: a test compares it with
-  the tags that godot-uxml knows (`UssControls.IMPLICIT_CLASSES`), and a
-  second test renders every entry without an `unsupported-control`
-  diagnostic.
+- **Library.** `EdElementCatalog` reads `UxmlControls.catalog()`
+  (request R9): every element, its namespace, the `container` flag and the
+  attributes with types, defaults and enum choices. The editor adds the
+  library group, the library order and the attributes of a new element.
+  UxmlObjects (`Columns`) and `TemplateContainer` are not in the library.
+  A test compares the library with the catalog; a second test renders
+  every entry without an `unsupported-control` diagnostic.
 - **Placement.** "Insert at the selection" puts the element into a
   selected container (the catalog `container` flag; an unknown element
   counts as a container), or after a selected leaf, or at the end of the
@@ -200,12 +221,16 @@ workspace.
   uses the namespace data of that copy; other text pastes when it is
   element source whose prefixes the destination binds. A headless run has
   no system clipboard; the editor then uses its own copy.
-- **Drag and drop** (`EdDragController`) reads the raw mouse events of the
-  window and never takes the press, so the lists still select. Rows are
-  found with the public `get_list_rows()` and `UxmlListRow.get_element()`.
-  A hierarchy drop goes before, into or after the row by the pointer
-  height. A canvas drop goes into the deepest container under the pointer,
-  at the child index along its `flex-direction`.
+- **Drag and drop** (`EdDragController`, request R12). godot-uxml runs
+  the drag: the library and the hierarchy TreeViews get Unity's four
+  callbacks (`set_drag_and_drop`). A drag starts after 5 pixels. Over the
+  hierarchy, the 5-pixel bands at the top and the bottom of a row drop
+  between items (the parent and the child index come from the tree); the
+  rest of a container row drops into the container, at the end; the rest
+  of another row drops before (upper half) or after (lower half) the row.
+  A release outside every collection ends with `"outside"`: the canvas
+  then takes the drop at the deepest container under the pointer, at the
+  child index along its `flex-direction`.
 
 ## Canvas manipulation
 
@@ -227,7 +252,7 @@ workspace.
   element, so the opposite edge stays. Values are whole pixels. A value
   that is not in px (`auto`, a percentage) is refused for a move; a resize
   measures the rendered border box.
-- **Write targets** (ADR 0004, port of `layoutStyleWritePlanner.ts`). The
+- **Write targets of a gesture** (ADR 0004, port of `layoutStyleWritePlanner.ts`). The
   godot-uxml computed style names the declaration that wins.
   `EdRenderHost.style_facts()` normalizes the origin: a rule of a project
   stylesheet, a theme rule, inline, inherited or default. A property is
@@ -242,10 +267,11 @@ workspace.
   bottom) snap to the edges and centres of the siblings and the parent
   within 6 screen pixels, and draw a guide. Without a target the leading
   edge snaps to the pixel grid.
-- **Hit-test.** `EdRenderHost.hit_test()` tests the point in the local
-  space of each control and of every clipping ancestor, so rotate, scale
-  and translate apply (godot-uxml sets them on the Control transform).
-  This is the workaround for request R8.
+- **Hit-test.** `EdRenderHost.hit_test()` is `UxmlDocument.element_at()`
+  (request R8): transforms and `overflow: hidden` clipping apply. A hit on
+  a control part selects the control; a hit on template content selects
+  the `<Instance>`. The selection outline of a rotated or scaled element
+  follows its transform (`get_element_transform`, request R14).
 - **Preview.** The canvas sends its input to the SubViewport
   (`push_input`) in document pixels. When a control in the document takes
   the focus, Godot removes the focus from the viewport of the editor
@@ -253,6 +279,57 @@ workspace.
   click in the canvas, until a click elsewhere. Ctrl+S, Z, Y, P and O stay
   with the editor. The end of preview renders the document again from the
   source.
+
+## Provenance inspector
+
+The inspector (`EdInspectorView`) shows, top down: the element type, the
+state preview, the classes, the attributes, the style rows, the
+declarations of the focused style property and the layout readout.
+
+- **Declarations.** A style field with the keyboard focus (or
+  `show_property()`) lists every declaration of the property from
+  `explain_style` (request R5), winner first: the status (`winner`,
+  `overridden`, `dropped`, `keyword`, `inherited`, `default`), the value
+  as written, and the origin with file and line (`EdProvenance`). A
+  shorthand row (`margin`) lists the declarations of its first longhand
+  (`margin-top`). A click on a row selects the declaration in the source
+  view; an inherited row selects the parent.
+- **Write targets** (ADR 0004, `EdStyleTargets`). The valid targets of a
+  property are the authored rules that apply with the same pseudo-states
+  (the winner first), the inline style (no state, one `style` attribute)
+  and a new rule `#name` or `.class` (with the states) in each stylesheet
+  of the document. Theme, inherited and default values are not targets.
+  A longhand before the shorthand that wins is not a target. One target
+  commits at once; more than one opens a picker menu (a godot-uxml
+  `UxmlPopupMenu` under the field). The choice stays for the property
+  until the selection or the state preview changes; a new rule becomes
+  the rule target after its first write. A target freezes its source; a
+  choice after a change of that source is refused (`stale-target`). An
+  empty value removes the declaration of the chosen target.
+- **Typed fields** (`EdStyleTypes`). Each value is checked for its kind
+  before a write: length, number, colour, enum (the keywords of
+  godot-uxml `UssProperties.ENUM_VALUES`), asset (`url()`, `resource()`,
+  `none`), angle, scale, translate, transform origin, time, easing,
+  property list. `var()` and the keywords `initial`, `unset` and
+  `inherit` always pass. Each fixed style row has a helper button: a
+  keyword menu (enum, easing, transition property), a unit menu (length,
+  angle, time, translate: the number of the field or of the computed
+  value with the new unit), the colour picker of godot-uxml (each change
+  writes to the target; one picker is one undo step) or an asset menu
+  (the project files of the right kind, as `url()` relative to the file
+  of the target; a `url()` to a file outside the project is refused).
+- **Classes.** Each class shows the rules of the document's stylesheets
+  that name it, with a mark when the rule applies now (an `explain_style`
+  query of the first declared property). A click shows the first rule.
+  Add and remove patch only the `class` value (`EdProvenance.add_class`,
+  `remove_class`); the last class removes the attribute.
+- **State preview.** Toggles force `:hover`, `:active`, `:focus`,
+  `:checked`, `:selected` and `:disabled` on the selected element
+  (request R6). The canvas shows the state, real input cannot clear it,
+  and the declarations and the write targets follow the states.
+- **Attributes.** Unset common attributes show the enum choices or the
+  default of the godot-uxml catalog as the placeholder; a menu next to the
+  add row lists the catalog attributes of the element.
 
 ## Editor window
 
@@ -267,11 +344,14 @@ search is a `uie:ToolbarSearchField`. The diagnostics filters are
 
 The inspector is a second godot-uxml document. The editor generates its
 UXML once (a skeleton with fixed rows for the common attributes and style
-properties, and pairs of extra rows) and then changes it in place for each
-selection: field values and placeholders go to the `LineEdit` controls,
-row names go to fixed-size `Label` controls, unused rows are
-`visibility: hidden`. A selection change then needs no new controls and
-no layout (request R15 has the costs). The document tabs are a third,
+properties, pairs of extra rows, class rows and declaration rows) and
+then changes it in place for each selection: field values and
+placeholders go to the `LineEdit` controls, row names and declaration
+texts go to fixed-size `Label` and `Button` controls, unused rows of a
+shown block are `visibility: hidden`, and a block that is not in use is
+not displayed (so the Attributes section has no gap). A selection change
+then needs few restyles and seldom a layout (requests R15, R17 have the
+costs). The document tabs are a third,
 small godot-uxml document (`EdTabBar`), generated when the tabs change.
 The hierarchy context menu is a godot-uxml `UxmlPopupMenu`.
 
@@ -285,7 +365,9 @@ one is mounted into a `*-host` element of the window document:
 | `FileDialog` (native) | Open Project | the operating system folder picker |
 | `ConfirmationDialog` | save over an external change; recovery (Recover or Discard); a file changed on disk and in the editor (Reload or Keep) | a modal question; godot-uxml has no modal window. `EdMain.ask()` queues the questions, one dialog at a time |
 | `Control` (menu anchor) | hierarchy context menu | `UxmlPopupMenu.open()` needs an anchor control; a plain `Control` at the pointer (request R16) |
-| `EdDragController` (a `Control` over the window) | drag and drop | draws the drag label and the hierarchy drop line over the godot-uxml shell; godot-uxml has no drag-and-drop API (request R12); it ignores the mouse |
+| `EdDragController` (a `Control` over the window) | drag and drop | draws the drag title at the pointer and the drop line of a before/after drop over a leaf row; godot-uxml runs the drag and draws its own indicator for the other drops (request R12); it ignores the mouse |
+| `ColorPicker` in a `PopupPanel` | inspector colour helper | the picker of godot-uxml `ColorField` (`UxmlEditorWidgets.open_color_picker`), opened for the chosen write target |
+| `Button.self_modulate` | inspector colour swatch | the computed colour without a restyle per selection (request R17) |
 | `EdCanvasView._draw` | selection outlines, handles, snap guides, the drop hint, the preview badge | drawn over the SubViewport texture at the canvas zoom; not document content |
 
 ## Projects and saving
@@ -348,7 +430,8 @@ that keep a frame cheap:
   Labels that change often have a size that does not depend on the text,
   so `EdUi.set_label()` changes them without a layout.
 - The inspector changes its document in place.
-- A `style` or `class` change patches the render (`EdRenderHost.patch()`).
+- A `style` or `class` change goes to `replace_source()` in place, a USS
+  change to `reload_stylesheet()` (`EdRenderHost.update()`).
 - The source view replaces only the changed text.
 - The hierarchy keeps a map from item id to row; the hit-test tries the
   deepest element first.
@@ -374,6 +457,11 @@ godot-uxml native core.
 - App: the real editor scene, headless: open, hit-test, selection sync,
   inspector and source edits through one history, re-render from unsaved
   USS, revision-checked save, external change reload.
+- Provenance (`test_provenance.gd`, `test_app_inspector.gd`): value
+  kinds and checks, write targets and the picker, stale choices, state
+  rules, class rules and class edits, the declaration rows and the jump
+  to source, the state preview on the canvas, the partial updates of the
+  render host, template clones and element rectangles.
 - Structure and layout: the library catalog against godot-uxml, insert
   with a namespace declaration, unwrap, remove and move of several
   elements, the clipboard, the step composer, write targets, gesture

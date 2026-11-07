@@ -174,8 +174,8 @@
 }
 
 .class-name {
-    width: 124px;
-    min-width: 124px;
+    width: 96px;
+    min-width: 96px;
     color: rgb(130, 190, 255);
 }
 

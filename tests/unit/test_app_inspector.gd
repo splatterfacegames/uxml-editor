@@ -203,7 +203,7 @@ func test_class_editor_lists_rules_and_edits_classes() -> void:
 	eq(cls[0]["rules"].map(func(r): return r["selector"]), [".menu-button.primary", ".menu-button"])
 	ok(cls[0]["rules"].all(func(r): return r["matches"]), "both rules apply")
 	var txt := String((m.inspector.doc.get_native("class-rules-0") as Button).text)
-	ok(txt.contains("✓ Menu.uss:7 .menu-button.primary"), txt)
+	ok(txt.contains("✓ .menu-button.primary  Menu.uss:7"), txt)
 	m.inspector._on_button("class-rules-1")
 	await frames()
 	eq(m.source_path, MENU_USS, "a click shows the first rule")

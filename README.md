@@ -40,7 +40,7 @@ message. Such an edit changes no file and adds no undo step.
   Each drag and each run of arrow keys is one undo step. An absolute
   element gets `left` and `top`; a relative element gets `margin-left` and
   `margin-top`. A resize writes `width` and `height`.
-- **Write targets.** A layout value goes to the declaration that sets the
+- **Write targets of a drag.** A layout value goes to the declaration that sets the
   current value: the USS rule or the inline style. A value from the theme
   or from no declaration goes into the inline style
   (`docs/adr/0004-style-write-targets.md`). A value from a pseudo-state
@@ -54,8 +54,8 @@ message. Such an edit changes no file and adds no undo step.
   document. Buttons, toggles, fields, sliders and scroll views work as at
   runtime. Preview changes no source text. The end of preview renders the
   document from the source again.
-- **Library.** The library lists every element that godot-uxml renders,
-  runtime (`ui:`) and editor (`uie:`), in five groups. Type in the search
+- **Library.** The library lists every element of the godot-uxml
+  catalog, runtime (`ui:`) and editor (`uie:`), in five groups. Type in the search
   field to filter the list. A double-click on an element (or Enter)
   inserts the element at the selection: into a selected container, or
   after another selected element. A drag to the canvas or the hierarchy
@@ -65,10 +65,11 @@ message. Such an edit changes no file and adds no undo step.
 - **Hierarchy.** The tree shows the authored elements. A selection in the
   tree, the canvas or the source view selects the same element in all
   views. Shift+click and Ctrl+click select more than one element. Drag
-  rows to reorder elements: a drop on the top quarter of a row goes before
-  the row, on the bottom quarter after the row, on the middle into the
-  row (for a container). A drag from the hierarchy to the canvas moves the
-  element into the container under the pointer. An element that
+  rows to reorder elements: a drop on the top or bottom 5 pixels of a row
+  goes between the rows. A drop on the rest of a container row goes into
+  the container. A drop on the rest of another row goes before the row
+  (upper half) or after the row (lower half). A drag from the hierarchy to
+  the canvas moves the element into the container under the pointer. An element that
   godot-uxml does not know stays in the tree with the mark `(unknown)` and
   a diagnostic. A right-click on a row opens a menu with the Edit commands
   for the selection.
@@ -80,9 +81,36 @@ message. Such an edit changes no file and adds no undo step.
   field (F2) renames the element type in the open and close tags.
 - **Source view.** Edit the text directly. A pause in typing makes one
   patch. The other views then show the change.
-- **Inspector.** Edit, add and remove attributes and inline style
+- **Inspector.** Edit, add and remove attributes and style
   declarations. Unset style fields show the computed value and the origin
-  of the value (a stylesheet, the theme, or a parent).
+  of the value (a stylesheet, the theme, or a parent). Unset attributes
+  show the choices or the default value from the godot-uxml catalog. The
+  **▾** button of the add row lists the attributes of the element.
+- **Declarations.** Put the keyboard focus in a style field. The
+  **Declarations** section lists every declaration of the property: the
+  status (winner, overridden, dropped, inherited, default), the value and
+  the file and line. Click a declaration to select the declaration in the
+  source view. Click an inherited value to select the parent.
+- **Style write targets.** A style edit goes to one target: an authored
+  rule that applies to the element, the inline style, or a new rule
+  (`#name` or `.class`) in a stylesheet of the document
+  (`docs/adr/0004-style-write-targets.md`). When more than one target is
+  valid, a menu asks for the target. The editor keeps the choice for the
+  property until the selection changes. A choice after a change of the
+  source stops with a message. An empty value removes the declaration.
+- **Typed style fields.** The editor checks each value for the type of
+  the property before the edit: length, number, colour, keyword, asset,
+  angle, scale, translate, time, easing. The button before a field opens
+  a keyword menu, a unit menu, the colour picker or a menu of the project
+  assets. An asset outside the project stops with a message.
+- **Classes.** The **Classes** section lists the classes of the element.
+  Each class shows the rules that name the class; ✓ marks a rule that
+  applies now. Click the rules to show the first rule in the source view.
+  Add and remove classes; the edit changes only the `class` value.
+- **State preview.** The **State preview** toggles force `:hover`,
+  `:active`, `:focus`, `:checked`, `:selected` and `:disabled` on the
+  selected element. The canvas shows the state. The declarations and the
+  write targets then show the rules of the state.
 - **Undo.** One history records the edits of all views and all tabs.
   An undo of an edit in another document shows the tab of that document
   (`docs/adr/0008-tabs-and-history.md`).
@@ -105,9 +133,8 @@ message. Such an edit changes no file and adds no undo step.
   Select a diagnostic to select its range in the source view and its
   element in the canvas and the hierarchy.
 
-`docs/roadmap.md` lists the next milestones: the provenance inspector,
-pseudo-state preview, the transition timeline, the state-machine panel
-and the web export.
+`docs/roadmap.md` lists the next milestones: the transition timeline,
+the state-machine panel and the web export.
 
 ## Screenshots
 
@@ -119,6 +146,10 @@ and the web export.
 | `docs/screenshots/m2-multi-select-duplicate.png` | Two buttons selected and duplicated with unique names. |
 | `docs/screenshots/m3-resize-snap.png` | A resize in progress with a snap guide; the inline width and height in the inspector. |
 | `docs/screenshots/m3-preview.png` | Preview mode with text typed in a document field. |
+| `docs/screenshots/m4-provenance.png` | The declarations of `background-color`: the winning rule and the theme value. The source view shows the declaration. |
+| `docs/screenshots/m4-target-picker.png` | The write-target menu of a `min-width` edit. |
+| `docs/screenshots/m4-state-preview.png` | `:hover` forced on a button. The `:hover` rule wins in the canvas and the inspector. |
+| `docs/screenshots/m4-classes.png` | The class editor with the rules of each class. |
 | `docs/screenshots/m5-diagnostics-jump.png` | A diagnostic selected in the list: the range in the source view, the element in the canvas, the hierarchy and the inspector. |
 | `docs/screenshots/m5-tabs.png` | Two documents in tabs; the active tab has unsaved edits. |
 | `docs/screenshots/m5-recovery.png` | The recovery question after a session that ended with unsaved edits. |
@@ -162,7 +193,7 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
 | `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
 | `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
-| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict` or `context-menu`. |
+| `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states` or `classes`. |
 | `--gdscript` | Use the GDScript path of godot-uxml (no native core). |
 | `--recovery-dir=<dir>` | Keep the recovery journals in this directory (default `user://recovery`). |
 | `--watch-interval=<seconds>` | Set the time between disk checks (default 2; 0 turns the timer off). |

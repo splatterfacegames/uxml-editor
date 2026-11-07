@@ -89,6 +89,7 @@ var _sticky_key := ""
 ## Lists project assets: (extensions: Array) -> Array of project paths.
 var asset_lister: Callable
 var _color_popup: PopupPanel = null
+var _anchor: Control = null
 var _coalesce := 0
 
 
@@ -517,7 +518,7 @@ func _class_rows(rows: Array) -> void:
 		_text("class-name-%d" % i, "." + String(r["name"]))
 		var parts: Array = []
 		for rule in r["rules"]:
-			parts.append("%s%s:%d %s" % ["✓ " if rule["matches"] else "", String(rule["path"]).get_file(), int(rule["line"]), rule["selector"]])
+			parts.append("%s%s  %s:%d" % ["✓ " if rule["matches"] else "", rule["selector"], String(rule["path"]).get_file(), int(rule["line"])])
 		_text("class-rules-%d" % i, "no rule names this class" if parts.is_empty() else "   ".join(parts))
 		_fields["class-rules-%d" % i] = {"kind": "class-rules", "name": r["name"]}
 		_fields["remove-class-%d" % i] = {"kind": "class", "name": r["name"]}
@@ -536,7 +537,7 @@ func _provenance_rows(rows: Array, choices: Array) -> void:
 		var status := String(r.get("status", ""))
 		_hide("prov-%d" % i, "link prov", not used, "status-" + status if used else "")
 		if used:
-			var t := EdProvenance.line(r)
+			var t := EdProvenance.line(r, EdProvenance.longhand_of(focused_property))
 			if i == PROV_ROWS - 1 and rows.size() > PROV_ROWS:
 				t = "… and %d more" % (rows.size() - PROV_ROWS + 1)
 			_text("prov-%d" % i, t)
@@ -733,8 +734,7 @@ func _open_picker(property: String, cs: Array, anchor: Control, then: Callable) 
 	pending = {"property": property, "choices": cs, "then": then}
 	var labels := PackedStringArray(cs.map(func(c): return String(c["label"])))
 	labels.append("Cancel")
-	var at: Control = anchor if anchor != null and anchor.is_inside_tree() else doc
-	picker = UxmlPopupMenu.open(at, labels, -1, doc.theme_path, doc)
+	picker = UxmlPopupMenu.open(_popup_anchor(anchor), labels, -1, doc.theme_path, doc)
 	picker.chosen.connect(choose)
 	picker.popup_hide.connect(_on_picker_hidden, CONNECT_DEFERRED)
 
@@ -749,6 +749,24 @@ func _close_picker() -> void:
 	if picker != null and is_instance_valid(picker):
 		picker.queue_free()
 	picker = null
+	if _anchor != null and is_instance_valid(_anchor):
+		_anchor.queue_free()
+	_anchor = null
+
+
+## A plain Control under `near` (a field or a button) as wide as the
+## inspector: UxmlPopupMenu takes the width of its anchor, and a field is
+## too narrow for the target labels.
+func _popup_anchor(near: Control) -> Control:
+	_anchor = Control.new()
+	_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_anchor)
+	var y := 40.0
+	if near != null and near.is_inside_tree():
+		y = near.get_global_rect().position.y - get_global_rect().position.y
+	_anchor.position = Vector2(8, y)
+	_anchor.size = Vector2(maxf(size.x - 24, 120), 18)
+	return _anchor
 
 
 ## The labels of the open target question ([] when none; tests).
@@ -900,7 +918,7 @@ func color_changed(property: String, c: Color, coalesce: String = "") -> void:
 func _menu(anchor: Control, items: Array, then: Callable) -> void:
 	_close_picker()
 	var labels := PackedStringArray(items.map(func(x): return String(x)))
-	picker = UxmlPopupMenu.open(anchor if anchor != null else doc, labels, -1, doc.theme_path, doc)
+	picker = UxmlPopupMenu.open(_popup_anchor(anchor), labels, -1, doc.theme_path, doc)
 	picker.chosen.connect(_on_menu_chosen.bind(labels, then))
 	picker.popup_hide.connect(_on_menu_hidden, CONNECT_DEFERRED)
 

@@ -1,17 +1,22 @@
 # ADR 0004: Style Write Targets
 
-> **Status: accepted, partly implemented in the Godot app.** Style targets
-> (`EdUssCommands.inline_target`, `rule_target`, `new_rule_target`) freeze
-> the source and the exact spans, and a stale commit is refused. Milestone
-> 1 writes inline styles only; the target picker over all cascade
-> candidates waits for godot-uxml request R5. Milestone 3 canvas gestures
-> (`EdLayoutCommands`) write each layout property to the declaration that
-> wins today: the authored rule or the inline declaration, or a new inline
-> declaration for a theme or default value. A pseudo-state winner and an
-> overridden longhand are refused. godot-uxml already reports
-> the winning origin of each computed value. The `evidence`
-> (measured/documented) labels below came from `uxml-preview`; godot-uxml
-> theme values are all measured in Unity 6000.3.
+> **Status: accepted, implemented in the Godot app (milestone 4).** Style
+> targets (`EdUssCommands.inline_target`, `rule_target`, `new_rule_target`)
+> freeze the source and the exact spans, and a stale commit is refused.
+> The inspector derives the valid targets from the godot-uxml cascade
+> candidates (`explain_style`, request R5) in `EdStyleTargets`: the
+> authored rules that apply with the same pseudo-states, the inline style
+> (no state), and a new `#name` or `.class` rule in each stylesheet of the
+> document. One valid target commits at once; more open a picker. The
+> choice stays for the property until the selection or the state preview
+> changes. Theme, inherited and default values have no authored
+> destination and are never offered. Milestone 3 canvas gestures
+> (`EdLayoutCommands`) still write each layout property to the declaration
+> that wins (or a new inline declaration for a theme or default value)
+> without a picker; a pseudo-state winner and an overridden longhand are
+> refused there. The `evidence` (measured/documented) labels below came
+> from `uxml-preview`; godot-uxml theme values are all measured in Unity
+> 6000.3.
 
 
 ## Decision

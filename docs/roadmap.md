@@ -6,10 +6,12 @@ render, pan, zoom, selection and hit-test, the hierarchy, the source view
 in sync, one undo history, inspector v1 (attributes and inline styles),
 revision-checked saves.
 
-Milestones 2, 3 and 5 (done on the `godot` branch, against godot-uxml
-`0c8b6cd` with workarounds): see the sections below. Screenshots:
-`docs/screenshots/m2-*.png`, `m3-*.png` and `m5-*.png`. Milestone 5 came
-before milestone 4, after a frame-cost pass (see "Frame cost" below).
+Milestones 2, 3, 4 and 5 (done on the `godot` branch): see the sections
+below. Screenshots: `docs/screenshots/m2-*.png`, `m3-*.png`, `m4-*.png`
+and `m5-*.png`. Milestone 5 came before milestone 4, after a frame-cost
+pass (see "Frame cost" below). Before milestone 4 the pin moved to
+godot-uxml `6137987` (requests R1-R14), and the editor replaced every
+workaround with the godot-uxml editor APIs (see "Re-pin" below).
 
 The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
@@ -73,7 +75,68 @@ The proposal was:
 - **Preview mode**: forward input to the SubViewport so buttons, fields
   and lists of the edited document react.
 
-## M4. Provenance inspector
+## Re-pin to godot-uxml 6137987 (done)
+
+Done: the pin moved from `0c8b6cd` to `6137987`. The render host loads
+with the buffer resolver (R1), reads elements through the handle lookups
+(R2), skips template clones with `instance_of()` (R3, R10), hits with
+`element_at()` (R8), measures with `get_element_rect()` and
+`get_element_transform()` (R14), and updates with `reload_stylesheet()`
+and `replace_source()` (R4). The library reads `UxmlControls.catalog()`
+(R9); drag and drop uses the collection drag of godot-uxml (R12). No code
+reads a private field of godot-uxml or copies its code.
+
+`bench/frame_cost.gd`, median of 3 runs per path (ms per frame; before
+-> after the re-pin):
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| selection | 12.5 -> 10.5 | 21.9 -> 20.4 | 25.6 -> 22.3 | 155.7 -> 71.8 |
+| drag (move) | 14.6 -> 14.7 | 15.0 -> 18.7 | 76.3 -> 66.0 | 79.2 -> 44.3 |
+| hover canvas | 0.18 -> 0.16 | 0.16 -> 0.17 | 2.7 -> 1.5 | 3.0 -> 0.9 |
+| typing | 1.7 -> 1.6 | 1.6 -> 1.6 | 2.4 -> 2.1 | 3.2 -> 2.1 |
+| commit of typing (max frame) | 35-154 -> 31-86 | 75-155 -> 14-115 | 981-2045 -> 301-505 | 2238-33102 -> 830-950 |
+| idle | 0.02 -> 0.02 | 0.03 -> 0.02 | 0.04 -> 0.03 | 0.04 -> 0.03 |
+
+The commit of a typing pause now goes through `replace_source()` instead
+of a full load. Other agents loaded the machine during the runs; the
+spread between runs is large (for example, selection on the large
+document, GDScript, 92-199 ms before).
+
+## M4. Provenance inspector (done)
+
+Done:
+
+- **Declarations** of the focused style property from `explain_style`
+  (R5): status, value as written, origin with file and line; a click
+  selects the declaration in the source view, an inherited row selects
+  the parent.
+- **Write targets** after ADR 0004 (`EdStyleTargets`): the matching
+  authored rules with the same states, inline, and a new rule for `#name`
+  or `.class` in each sheet of the document. One target commits at once;
+  more targets open a picker; the choice stays for the property until the
+  selection changes; a stale choice is refused.
+- **Typed fields** (`EdStyleTypes`): a check per value kind (length,
+  number, colour, enum from godot-uxml, asset, angle, scale, translate,
+  origin, time, easing, property list) and a helper per fixed row
+  (keyword menu, unit menu, colour picker, asset menu with project path
+  validation).
+- **Class editor**: add and remove classes (exact patches of the `class`
+  value) and the rules of each class, with a mark for the rules that
+  apply now.
+- **State preview** with forced states (R6): `:hover`, `:active`,
+  `:focus`, `:checked`, `:selected`, `:disabled`. The canvas shows the
+  state; the declarations and the targets show and edit the state rules.
+- **Attributes**: enum choices and defaults of the catalog (R9) as
+  placeholders, a menu of the catalog attributes; no gap from the spare
+  rows.
+
+Not done: a USS rule view of a whole sheet (the source view shows the
+sheet); a write-target picker for canvas gestures (they write to the
+winner, as in M3); per-row typed controls that show the current value
+(request R17); `transition-*` easing curve previews (M6).
+
+The proposal was:
 
 - For each property: the computed value, the declaration that wins, the
   declarations it overrides, and "inherited from" / "theme default".
@@ -142,10 +205,8 @@ The proposal was:
 
 ## M6. Pseudo-states and the transition timeline
 
-- **State preview**: toggles for `:hover`, `:active`, `:focus`,
-  `:checked`, `:disabled` on the selected element. Request R6 makes the
-  state stay on whatever the pointer does. Transitions play on each
-  toggle.
+- **State preview**: done in M4 (forced states, R6). Left for M6: play
+  the transitions of each toggle on the timeline.
 - **Transition timeline** (old issues #6-#11, #18): run the document with
   `transitions_manual = true`; show one track per running transition
   (element, property, delay, duration, easing); play, pause, step and
@@ -159,6 +220,7 @@ The proposal was:
   style each state as edges. Selecting a node forces the state (R6) and
   opens the rules in the provenance inspector. Selecting an edge plays the
   transition between the two states on the timeline (M6).
+  Request R7 (`get_transitions`, `seek_transitions`) is in the pin.
 
 ## M8. Packaging and the web export
 
