@@ -191,6 +191,13 @@ message. Such an edit changes no file and adds no undo step.
 
 `docs/roadmap.md` lists the milestones.
 
+## Reel
+
+`--reel` plays the announcement video of the site on a fixed timeline
+(`src/app/reel.gd`, with a copy of godot-uxml's settings screen in
+`tools/reel`). `GODOT=<godot> tools/record_reel.sh <out dir>` records it
+with Godot's Movie Maker at 60 fps, 1920x1080, one PNG per frame.
+
 ## Screenshots
 
 | File | Shows |

@@ -19,6 +19,8 @@ extends Control
 ##   --settings=<file>    per-user settings file (default user://settings.cfg)
 ##   --ready-file=<path>  write this file after the options ran (tests)
 ##   --exit-after=<s>     quit after this many seconds (tests)
+##   --reel               play the announcement reel on a fixed timeline
+##                        (EdReel; record with tools/record_reel.sh)
 ##   --demo=<name>        stage a documentation state before the screenshot
 ##                        (EdDemo: palette, drag-canvas, drag-hierarchy,
 ##                        resize, multi, preview)
@@ -435,6 +437,8 @@ func _parse_args() -> void:
 		_screenshot.call_deferred(String(_args["screenshot"]))
 	if _args.has("smoke"):
 		_smoke.call_deferred()
+	if _args.has("reel"):
+		add_child(EdReel.new(self))
 
 
 ## The --smoke option (a check of a packaged build): wait for the render,
