@@ -26,27 +26,42 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R12 | P2 | done in `6137987` | Drag and drop for collection items |
 | R13 | P3 | fixed in `6137987` | `background-image: none` on a checked ToolbarToggle |
 | R14 | P3 | done in `6137987` | Rectangle of an element in another element's space |
-| R15 | P2 | text and `display` parts done in `dc2c081`; build cost open | Build cost of a document; text updates without a layout |
+| R15 | P2 | text and `display` parts done in `dc2c081`; build cost open (measured again in `f4ffe6e`) | Build cost of a document; text updates without a layout |
 | R16 | P3 | done in `dc2c081` | Context menu at a point, in the look of the owner document |
-| R17 | P3 | text values done in `1167eb1`; Toggle open | Value updates of field controls without a restyle |
-| R18 | P3 | done in `1167eb1`; not used yet (R28) | Elide the placeholder of a text field |
+| R17 | P3 | done: text values in `1167eb1`, Toggle values in `f4ffe6e`; a property subset open | Value updates of field controls without a restyle |
+| R18 | P3 | done in `1167eb1`; used since `f4ffe6e` (R28) | Elide the placeholder of a text field |
 | R19 | P3 | done in `1167eb1` | Runtime classes of an element; finish all transitions |
 | R20 | P3 | done in `1167eb1` | Public easing, shorthand and elision helpers |
 | R21 | P3 | done in `1167eb1` | A signal when a split view changes size |
 | R22 | P3 | done in `1167eb1` | Text changes that are stable inside a ScrollView, and a unitless `flex-basis: 0` |
 | R23 | P3 | not changed (Unity does the same); `clear_completed_transitions` in `1167eb1` | A completed transition after an instant change stops a later run |
 | R24 | P3 | done in `1167eb1` | The selected row of a list without focus in the editor skins |
-| R25 | P2 | done in `1167eb1` | A stylesheet reload that restyles only what the edit can change |
+| R25 | P2 | done in `1167eb1`; selector and rule edits in `f4ffe6e` | A stylesheet reload that restyles only what the edit can change |
 | R26 | P3 | done in `1167eb1` | The transitions of a state change, without the change |
-| R27 | P2 | open (workaround) | A TextField that is not `is-delayed` loses its caret at each change |
-| R28 | P3 | open (workaround) | A placeholder update without a restyle |
-| R29 | P2 | open (workaround) | A scroll of a collection view lays out the whole document |
+| R27 | P2 | done in `f4ffe6e` | A TextField that is not `is-delayed` loses its caret at each change |
+| R28 | P3 | done in `f4ffe6e` | A placeholder update without a restyle |
+| R29 | P2 | done in `f4ffe6e` for FixedHeight rows; other cases open | A scroll of a collection view lays out the whole document |
+| R30 | P3 | open | `set_field_placeholder` costs more than a write to the `LineEdit` |
+| R31 | P3 | open (the editor avoids it) | A font change of an element whose size does not follow its text lays out the document |
+| R32 | P2 | open | A new source of a TreeView lays out the whole document |
 
-The editor pins godot-uxml `1167eb1` (github.com/splatterfacegames/godot-uxml),
-which has R1-R14, R16, R18-R22, R24-R26, the text and `display` parts of R15,
-the text part of R17, and `clear_completed_transitions` for R23. The
-sections of the done requests give the final API and where the editor uses
-it. The open requests keep their workaround notes.
+The editor pins godot-uxml `f4ffe6e` (github.com/splatterfacegames/godot-uxml),
+which has R1-R14, R16-R22, R24-R29, the text and `display` parts of R15, and
+`clear_completed_transitions` for R23. The sections of the done requests give
+the final API and where the editor uses it.
+
+Open upstream (no editor workaround):
+
+- R15: the build cost per control (about 0.5 ms native and 1.5 ms GDScript).
+  godot-uxml measured it again in `f4ffe6e` and changed nothing.
+- R17: a state change computes every property of the elements that it
+  reaches; the `:checked` rules set few. About 0.03 ms of a 0.9 ms update.
+- R29: a DynamicHeight row, a row of a view that scrolls horizontally and a
+  change of the row element itself (its own padding or `display`) still lay
+  out the whole document. The hierarchy, the library, the project list and
+  the diagnostics have FixedHeight rows.
+- R30-R32: new requests from this pin (the cost of `set_field_placeholder`,
+  a font change that lays out the document, a new source of a TreeView).
 
 ## R1. Load from text with a caller resolver (P1, done)
 
@@ -310,7 +325,7 @@ is gone.
 item, and at the corner of the window: the editor skin, the checkmark column,
 separators, the hover colour, and the menu stays inside the window. No defect.
 
-## R17. Value updates of field controls without a restyle (P3, partly done)
+## R17. Value updates of field controls without a restyle (P3, done)
 
 Done in `1167eb1`:
 
@@ -325,26 +340,35 @@ fields of the timeline, and the Preview, States, Snap and state-preview
 toggles write through `set_field_value`. The direct writes to the `LineEdit`
 controls and the silent model writes of the values are gone.
 
-**Open: a Toggle value still restyles** through `:checked`. A node of the
-state-machine panel costs one layout of the inspector: 15.3 ms native and 68
-ms GDScript on the menu fixture (`1167eb1`).
+**Toggle values: done in `f4ffe6e`.** A Toggle value restyles only the
+subtree of the Toggle and lays out nothing. Before, a node of the
+state-machine panel cost one layout of the inspector: 15.3 ms native and 68
+ms GDScript on the menu fixture (`1167eb1`). After the pin, the bold winner
+row of the declaration list still laid out the inspector (R31); without it,
+forcing a state costs 16.2 ms GDScript on the menu fixture (65.7 ms before).
+The figures are in `docs/roadmap.md` ("Re-pin to godot-uxml f4ffe6e").
+
+**Open upstream: a property subset.** The cascade of a state change computes
+every property of the elements that it reaches. About 0.03 ms native of a 0.9
+ms update; not a need of the editor.
 
 **Cost.** In a scratch document with 70 fields, 70 `set_field_value` calls
 cost about 11 ms (native and GDScript) against about 1.6 ms for direct
 `LineEdit` writes. Selection on the menu fixture went from 9.8 to 10.4 ms
 (native) and from 16.7 to 18.3 ms (GDScript). Not a request yet.
 
-## R18. Elide the placeholder of a text field (P3, done; not used yet)
+## R18. Elide the placeholder of a text field (P3, done)
 
 Done in `1167eb1`: `text-overflow: ellipsis` on a single-line field elides its
 placeholder, with the whole text as the tooltip.
 
-**Editor use: none yet.** godot-uxml elides a placeholder that changes through
-the model (`placeholder-text`), and a model change restyles the field. The
-inspector changes about 70 placeholders per selection: 8 ms through the model
-against 1.6 ms through the `LineEdit`. Request R28 asks for a placeholder
-update without a restyle. Until then `EdUi.elided_placeholder()` shortens the
-text, and the inspector sets it on the `LineEdit`.
+**Editor use (since `f4ffe6e`).** The inspector fields have
+`text-overflow: ellipsis` (`.field` in `inspector.uss`) and get their
+placeholder through `set_field_placeholder` (R28). godot-uxml elides the text
+at the width of the field, also after a pane resize. `EdUi.elided_placeholder()`
+and the refit of the inspector at a resize are gone. The fields have
+`display-tooltip-when-elided="false"`: the inspector sets the tooltip itself
+(the value, or the whole placeholder).
 
 ## R19. Runtime classes of an element; finish all transitions (P3, done)
 
@@ -426,6 +450,17 @@ The target is 100 ms (native), so the pause of 0.4 s before the render
 renders in the same frame. The preview of the drag (`set_preview`) stays for
 the frames of the drag.
 
+**Selector and rule edits (`f4ffe6e`).** `get_last_reload_mode()` can also
+return `"rules"`: a selector or rule edit compiles the rules again in the same
+cascade and computes only the elements that the changed rules match (above 32
+changed rules, `"cascade"`). The controls and the forced states stay, as for
+`"restyle"`. The editor does not branch on the mode: every mode of
+`reload_stylesheet` keeps the controls. `EdRenderHost.last_modes` records the
+mode of each file of the last update (tests and benchmarks).
+`test_a_selector_edit_reloads_the_rules_in_place` checks that a selector edit
+and a new rule take `"rules"`, keep the control and the forced state, and
+apply the new rule.
+
 ## R26. The transitions of a state change, without the change (P3, done)
 
 Done in `1167eb1`:
@@ -443,51 +478,120 @@ that only the theme changes through `transition-property: all` now counts
 costs more: 3.0 -> 3.8 ms (menu, native) and 3.0 -> 10.6 ms (large, native);
 a build waits for a frame without a change.
 
-## R27. A TextField that is not `is-delayed` loses its caret at each change (P2)
+## R27. A TextField that is not `is-delayed` loses its caret at each change (P2, done)
 
-Each character typed into a TextField without `is-delayed` puts the caret at
-position 0 after the restyle of the change, so "dupl" shows as "lpud". Seen
-in a plain document with one `<ui:TextField>` at `dc2c081` and `1167eb1`, and
-in the library search of the editor (a `ToolbarSearchField`). A field with
-`is-delayed="true"` keeps its caret.
+Each character typed into a TextField without `is-delayed` put the caret at
+position 0 after the restyle of the change, so "dupl" showed as "lpud" (seen
+at `dc2c081` and `1167eb1`).
 
-Request: keep the caret column of the `LineEdit` when the restyle of a value
-change writes the same text.
+Done in `f4ffe6e`: `UxmlTextInput.configure` writes only the properties that
+change, and the model update of a value change does not configure the editor
+again. The caret stays where the user typed.
 
-**Workaround.** `EdUi.live_text()` reads the caret at `gui_input` (before the
-`LineEdit` handles the key), and puts it back after the change and at the next
-frame. The command palette search is `is-delayed`, and both searches read the
-text through `LineEdit.text_changed`. Test:
-`test_typing_in_the_library_search_keeps_the_order`.
+**Editor use.** The library search (`palette-search`) and the command palette
+search (`cp-search`) are live TextFields without `is-delayed`, and the editor
+reads them through `value_changed`. The workaround `EdUi.live_text()` (the
+caret read at `gui_input` and put back at the next frame) is gone. Tests, on
+both paths: `test_typing_in_the_library_search_keeps_the_order` and
+`test_typing_in_the_command_palette_keeps_the_order` (keys through
+`Viewport.push_input`).
 
-## R28. A placeholder update without a restyle (P3)
+## R28. A placeholder update without a restyle (P3, done)
+
+Done in `f4ffe6e`:
 
 ```gdscript
 # UxmlDocument
-## Set the placeholder of a text field; no restyle when the size of the
-## field does not change. R18 elides the new text.
 func set_field_placeholder(element_name: String, text: String) -> bool
+func get_field_placeholder(element_name: String) -> String
 ```
 
-**Use case.** The inspector shows the computed value and its origin as the
-placeholder of about 70 fields per selection (R18).
+`placeholder-text` is not an input of the cascade, so no restyle runs. A
+layout runs only when the minimum size of the `LineEdit` changes. R18 elides
+the new text.
 
-**Workaround.** `EdUi.elided_placeholder()` and a direct write to
-`LineEdit.placeholder_text`, with the model attribute set without a change
-notification (`EdUi.set_silent`).
+**Editor use.** The inspector sets the computed value and its origin (about
+70 fields per selection) with `set_field_placeholder`, and
+`EdInspectorView.placeholder_of()` reads `get_field_placeholder`. The value
+hint of the add row and the placeholder of the command palette search per
+mode use it too. `EdUi.elided_placeholder()`, `EdUi.set_silent()` and the
+direct writes to `LineEdit.placeholder_text` are gone.
 
-## R29. A scroll of a collection view lays out the whole document (P2)
+## R29. A scroll of a collection view lays out the whole document (P2, done for FixedHeight rows)
 
-`scroll_to_item()` on a TreeView binds the visible rows again, and the next
-restyle lays out the whole window document. On the 507-element document a
-selection that scrolls the hierarchy costs about 32 ms native and 98 ms
-GDScript, against 15 ms and 17 ms for a selection without the scroll
-(scratch measure, two frames per selection). This was the unexplained window
-layout of selection in milestone 7 (37 layouts per 60 selections).
+`scroll_to_item()` on a TreeView bound the visible rows again, and the next
+restyle laid out the whole window document. On the 507-element document a
+selection that scrolled the hierarchy cost about 32 ms native and 98 ms
+GDScript (`1167eb1`).
 
-Request: a scroll and a row rebind of a collection view with a fixed item
-height lay out only the rows (the viewport has a fixed size).
+Done in `f4ffe6e`: a rebind of rows (a scroll, a selection, a new source)
+lays out only the rows when a row has a fixed size (a FixedHeight row of a
+vertical view). `layout_count` does not count these layouts;
+`local_layout_count` counts them.
 
-**Workaround.** `EdMain._select_in_tree` scrolls only for a row outside the
-view, and only after a frame without another selection, so a run of
-selections scrolls once (`test_a_selection_outside_the_hierarchy_view_scrolls_once`).
+**Editor use.** No code change was necessary. The window layouts of 60 scroll
+frames of the hierarchy on the 507-element document went from 61 to 1. The
+rebind of the rows still costs about 16 ms native and 50 ms GDScript, so
+`EdMain._select_in_tree` keeps the scroll for a row outside the view, after a
+frame without another selection.
+`test_a_selection_outside_the_hierarchy_view_scrolls_once_without_a_layout`:
+five selections that scroll keep `layout_count` and raise
+`local_layout_count`; a run of selections scrolls once.
+
+**Open upstream.** A DynamicHeight row, a row of a view that scrolls
+horizontally and a change of the row element itself still lay out the whole
+document. The editor has none of these.
+
+## R30. `set_field_placeholder` costs more than a write to the `LineEdit` (P3)
+
+The inspector sets about 70 placeholders per selection. A scratch measure on
+the menu fixture (60 selections, the state-machine panel open, `f4ffe6e`),
+ms per frame:
+
+| Placeholder write | native | GDScript |
+| --- | --- | --- |
+| `set_field_placeholder` (R28, with the R18 elision) | 20.3-22.6 | 70.0-71.5 |
+| `set_field_placeholder` of a text that the editor elided (no `text-overflow`) | 17.6 | 62.8-64.0 |
+| a direct write to `LineEdit.placeholder_text` | 13.6-16.6 | 49.0-54.9 |
+| no placeholder write | 15.4-16.0 | 53.3-55.2 |
+
+So most of the cost is the write itself (`bind_write`), not the elision. The
+editor uses `set_field_placeholder` (the model and the control stay the
+same). The selection of the menu fixture went from 11.8 to 14.3 ms (native)
+and from 18.3 to 20.2 ms (GDScript) in `bench/frame_cost.gd`.
+
+Request: a placeholder write that costs about as much as the `LineEdit`
+write (about 0.02 ms per field) when the minimum size of the field does not
+change, for example a write of the control and the attribute without the
+behavior's whole `bind_write`.
+
+## R31. A font change of an element whose size does not follow its text lays out the document (P3)
+
+The rows of the declaration list (`.link.prov`, `height: 18px`, stretched in
+a column) changed `-unity-font-style` with their status class (bold for the
+winner). A font change is not paint-only, so each change laid out the whole
+inspector: forcing a state in the state-machine panel cost 28 layouts in 60
+frames, about 25 ms on GDScript each.
+
+**Workaround.** The winner row has no `-unity-font-style`; it has a brighter
+colour (`.status-winner` in `inspector.uss`). Test:
+`test_forcing_states_lays_out_no_inspector`.
+
+Request: a change of `-unity-font-style`, `-unity-font` or `font-size` on an
+element whose two axes are fixed (the rule of `_text_stable` and
+`_fixed_axis`) runs no layout, or lays out only its subtree, as a text change
+does (R15).
+
+## R32. A new source of a TreeView lays out the whole document (P2)
+
+Each key in the library search filters the library: `set_tree_source` with
+the new items and `set_tree_item_expanded` for each group. Each key lays out
+the whole window document twice (`bench/frame_cost.gd`, "typing in the
+library search": 120 window layouts in 60 frames). A key costs about 15-17
+ms native and 88-96 ms GDScript (the browser) on both pins. The rows have a
+fixed height, and the tree view has a fixed size in its pane.
+
+Request: a new source and an expand of a collection view with FixedHeight
+rows in a view of a fixed size lay out only the rows, as R29 does for a
+scroll.
+

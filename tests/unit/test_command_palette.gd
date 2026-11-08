@@ -226,8 +226,9 @@ func test_every_command_runs_from_the_palette() -> void:
 
 
 func test_typing_in_the_library_search_keeps_the_order() -> void:
-	# A TextField that is not is-delayed loses its caret at each change in
-	# godot-uxml (request R27); EdUi.live_text puts it back.
+	# The search is a live TextField (not is-delayed). godot-uxml keeps its
+	# caret at each change (request R27, pin f4ffe6e); value_changed gives
+	# the text as the user types.
 	var m := await editor()
 	var le := EdUi.line_edit(m.shell, "palette-search")
 	ok(le != null)
@@ -238,3 +239,20 @@ func test_typing_in_the_library_search_keeps_the_order() -> void:
 	eq(le.text, "slid")
 	eq(le.caret_column, 4)
 	eq(m.palette.query, "slid", "the library filters as the user types")
+
+
+func test_typing_in_the_command_palette_keeps_the_order() -> void:
+	var m := await editor()
+	m.command_palette.open()
+	await frames()
+	var le := EdUi.line_edit(m.command_palette.doc, "cp-search")
+	ok(le != null)
+	ok(le.has_focus(), "the search has the focus")
+	await _type(m, "dupl")
+	await frames()
+	eq(le.text, "dupl")
+	eq(le.caret_column, 4)
+	eq(m.command_palette.query, "dupl", "the palette filters as the user types")
+	ok(m.command_palette.rows.size() > 0, "a command matches")
+	m.command_palette.close()
+	await frames()

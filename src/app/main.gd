@@ -131,6 +131,7 @@ func _ready() -> void:
 	set_process(false)
 	add_symbol_fallback()
 	get_window().title = "UXML Editor"
+	_scale_to_device()
 	get_window().min_size = Vector2i(1000, 600)
 	shell = UxmlDocument.new()
 	shell.auto_load = false
@@ -203,7 +204,6 @@ func _ready() -> void:
 	canvas.nudged.connect(layout.nudge)
 	palette = EdPaletteView.new(shell)
 	palette.refresh()
-	EdUi.live_text(shell, "palette-search", func(t: String): palette.set_query(t))
 	drag = EdDragController.new()
 	drag.shell = shell
 	drag.canvas = canvas
@@ -267,7 +267,7 @@ func _ready() -> void:
 		watch_timer.start()
 	if web != null:
 		var native := ClassDB.class_exists("UxmlNativeParser") and UxmlParser.use_native
-		print("UXML Editor ready: core %s, renderer %s" % ["native" if native else "GDScript", RenderingServer.get_current_rendering_method()])
+		print("UXML Editor ready: core %s, renderer %s, scale %.2f" % ["native" if native else "GDScript", RenderingServer.get_current_rendering_method(), get_window().content_scale_factor])
 
 
 ## The --settings=<file> option (read before the other options: the pane
@@ -279,22 +279,77 @@ static func _settings_arg() -> String:
 	return ""
 
 
+## The pane sizes of the last session (or of the document), before the fit
+## to the window: split -> size.
+var _wanted: Dictionary = {}
+## The sizes that _fit_splits() set below the wanted size: split -> size.
+var _fitted: Dictionary = {}
+
+
 ## The pane sizes of the last session.
 func _restore_splits() -> void:
 	for sp in SPLITS:
 		var d = settings.get_value("layout", sp)
 		if d != null and (d is float or d is int):
 			shell.set_split_dimension(sp, clampf(float(d), 40.0, 4000.0))
+		_wanted[sp] = shell.get_split_dimension(sp)
+	get_viewport().size_changed.connect(_fit_splits)
+	_fit_splits()
+
+
+## The fixed panes of a small window (the editor embedded in a page, a
+## laptop screen) get smaller, so the canvas and the source view keep room.
+## A pane never gets larger than its wanted size. The center column keeps
+## at least half of the width, the source view at least 340 px of it, and
+## the canvas at least half of the height.
+func _fit_splits() -> void:
+	if shell == null or _wanted.is_empty():
+		return
+	var size := get_viewport_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		return
+	var fit := {}
+	var left: float = _wanted["main-split"]
+	var insp: float = _wanted["right-split"]
+	var center_min := size.x * 0.5
+	if size.x - left - insp < center_min:
+		var k := maxf(0.0, size.x - center_min) / maxf(1.0, left + insp)
+		left = maxf(160.0, left * k)
+		insp = maxf(240.0, insp * k)
+	fit["main-split"] = left
+	fit["right-split"] = insp
+	var center := size.x - left - insp
+	fit["source-split"] = minf(_wanted["source-split"], maxf(120.0, center - maxf(340.0, center * 0.45)))
+	fit["center-split"] = minf(_wanted["center-split"], maxf(200.0, size.y * 0.5))
+	fit["lower-split"] = minf(_wanted["lower-split"], fit["center-split"] * 0.45)
+	fit["left-split"] = minf(_wanted["left-split"], size.y * 0.2)
+	fit["hier-split"] = minf(_wanted["hier-split"], size.y * 0.4)
+	for sp in fit:
+		var d: float = snappedf(fit[sp], 1.0)
+		if d < float(_wanted[sp]) - 0.5:
+			_fitted[sp] = d
+		else:
+			d = _wanted[sp]
+			_fitted.erase(sp)
+		if absf(shell.get_split_dimension(sp) - d) >= 0.5:
+			shell.set_split_dimension(sp, d)
 
 
 ## Keep the pane sizes (at the end of a drag of a split line, godot-uxml
-## split_changed, and at close).
+## split_changed, and at close). A pane that the fit to a small window made
+## smaller keeps its wanted size; a pane that the user changed keeps the new
+## size.
 func save_splits() -> void:
 	var changed := false
 	for sp in SPLITS:
 		if shell.get_element(sp) == null:
 			continue
 		var d := snappedf(shell.get_split_dimension(sp), 1.0)
+		if _fitted.has(sp) and absf(d - float(_fitted[sp])) < 0.5:
+			d = snappedf(float(_wanted[sp]), 1.0)
+		else:
+			_fitted.erase(sp)
+			_wanted[sp] = d
 		if settings.set_value("layout", sp, d):
 			changed = true
 	if changed:
@@ -979,12 +1034,36 @@ func _on_project_opened() -> void:
 	state.workspace.history.history_changed.connect(_update_history_label)
 	_update_history_label()
 	_refresh_files()
-	shell.set_text("document-label", state.store.root)
+	# The folder name; the tooltip has the whole path. A screenshot or a
+	# shared screen shows no local path.
+	shell.set_text("document-label", project_label(state.store.root))
+	var label := shell.get_native("document-label")
+	if label != null:
+		label.tooltip_text = state.store.root
 	var uxml := state.workspace.paths_with_extension(".uxml")
 	if not uxml.is_empty() and not _args.has("open"):
 		state.open_document(uxml[0])
 	elif uxml.is_empty():
 		_queue_render()
+
+
+## In a browser the canvas element has device pixels: on a high-DPI screen
+## (devicePixelRatio 2) the editor draws at its CSS size with the content
+## scale of the window (the canvas_items stretch of Godot), as the web demo
+## of godot-uxml does. The desktop keeps a scale of 1.
+func _scale_to_device() -> void:
+	if not OS.has_feature("web"):
+		return
+	var ratio = JavaScriptBridge.eval("window.devicePixelRatio || 1", true)
+	if ratio != null and float(ratio) > 1.0:
+		get_window().content_scale_factor = float(ratio)
+
+
+## The name of project directory `root` for the toolbar: its last folder.
+static func project_label(root: String) -> String:
+	var r := root.replace("\\", "/").trim_suffix("/")
+	var name := r.get_file()
+	return name if not name.is_empty() else r
 
 
 func _on_document_opened(path: String) -> void:
@@ -1313,9 +1392,11 @@ func _select_in_tree(nodes: Array) -> void:
 		if _tree_rows.has(n.id) and not found.has(_tree_rows[n.id]):
 			found.append(_tree_rows[n.id])
 	shell.set_selection("hierarchy-tree", found)
-	# A scroll binds the rows again and lays out the whole window (request
-	# R28): only for a row outside the view, and only after a frame without
-	# another selection, so a run of selections scrolls once.
+	# A scroll lays out only the rows (godot-uxml R29), but the rebind of
+	# the rows still costs about 16 ms native and 64 ms GDScript on a
+	# 500-element document. So the scroll is only for a row outside the
+	# view, and only after a frame without another selection: a run of
+	# selections scrolls once.
 	_scroll_row = found[0] if not found.is_empty() and not _row_in_view("hierarchy-tree", found[0]) else -1
 	_scroll_wait = 2
 	set_process(_scroll_row >= 0)

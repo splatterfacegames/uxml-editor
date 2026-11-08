@@ -86,9 +86,16 @@ static func log_line(msg: String) -> void:
 	print("web: " + msg)
 
 
-## The smoke hook: "select <name>" selects the element with that name.
+## The smoke hook: "select <name>" selects the element with that name;
+## "layout" logs the content scale, the size of the view and the widths of
+## the source view and the inspector.
 func smoke(command: String) -> void:
 	var parts := command.split(" ", false, 1)
+	if command == "layout" and main != null:
+		var m = main
+		var view: Vector2 = m.get_viewport_rect().size
+		log_line("layout scale %.2f view %dx%d source %d inspector %d" % [m.get_window().content_scale_factor, int(view.x), int(view.y), int(m.source.size.x), int(m.inspector.size.x)])
+		return
 	if parts.size() == 2 and parts[0] == "select" and main != null and main.state.session != null:
 		for n in main.state.session.root().walk():
 			if n.get_attribute("name") == parts[1]:
@@ -303,7 +310,9 @@ func refresh(paths: Array) -> Array:
 	_call("stat", JSON.stringify({"files": req}), func(json: String) -> void:
 		answer[0] = json
 		disk_checked.emit())
-	if answer[0] == null:
+	# disk_checked comes for every answer: a poll of the watch timer and a
+	# save can wait at the same time. Wait for the answer of this request.
+	while answer[0] == null:
 		await disk_checked
 	var changed: Array = []
 	var r = JSON.parse_string(String(answer[0]))
@@ -318,6 +327,8 @@ func refresh(paths: Array) -> Array:
 				changed.append(rel)
 			continue
 		if f.has("data"):
+			var was: Dictionary = disk.get(rel, {})
+			log_line("disk changed %s: mtime %s -> %s, size %s -> %s" % [rel, str(was.get("mtime", "")), str(f["mtime"]), str(was.get("size", "")), str(f["size"])])
 			_write_copy(rel, Marshalls.base64_to_raw(String(f["data"])))
 			changed.append(rel)
 		disk[rel] = {"mtime": int(f["mtime"]), "size": int(f["size"])}
@@ -357,7 +368,7 @@ func push(paths: Array, bases: Dictionary, force: bool = false) -> Array:
 		_call("write", JSON.stringify(req), func(json: String) -> void:
 			answer[0] = json
 			disk_checked.emit())
-		if answer[0] == null:
+		while answer[0] == null:
 			await disk_checked
 		var r = JSON.parse_string(String(answer[0]))
 		if not r is Dictionary:

@@ -52,7 +52,7 @@ func open(which: String = "commands") -> void:
 	doc.set_field_value("cp-search", "")
 	_syncing = false
 	EdUi.set_label(doc, "cp-title", "Keyboard shortcuts" if mode == "shortcuts" else "Commands")
-	_silent_placeholder("Type to search the shortcuts" if mode == "shortcuts" else "Type to search the commands")
+	doc.set_field_placeholder("cp-search", "Type to search the shortcuts" if mode == "shortcuts" else "Type to search the commands")
 	_refresh()
 	var le := EdUi.line_edit(doc, "cp-search")
 	if le != null:
@@ -118,7 +118,6 @@ func _ensure_loaded() -> void:
 	for d in doc.diagnostics:
 		push_warning("command palette: " + UxmlDiagnostic.format(d))
 	doc.value_changed.connect(_on_value)
-	EdUi.live_text(doc, "cp-search", _on_typed)
 	doc.items_chosen.connect(_on_chosen)
 	doc.selection_changed.connect(_on_selection)
 
@@ -159,18 +158,6 @@ func _show_choice() -> void:
 		doc.set_selection("cp-list", [index])
 		doc.scroll_to_item("cp-list", index)
 	_syncing = false
-
-
-func _silent_placeholder(text: String) -> void:
-	var c := doc.get_native("cp-search") as LineEdit
-	if c != null:
-		c.placeholder_text = text
-	EdUi.set_silent(doc, "cp-search", "placeholder-text", text)
-
-
-func _on_typed(text: String) -> void:
-	if not _syncing and text != query:
-		set_query(text)
 
 
 func _on_value(element_name: String, value: Variant) -> void:

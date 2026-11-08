@@ -190,7 +190,10 @@ h1 {
   border-color: #6a6a6a;
 }
 
+/* The editor is laid out for 1600 x 900. The shell grows past the text
+   column, up to 1600 px and to 24 px from each side of the window. */
 .app-shell {
+  margin-inline: min(0px, calc(50% - min(800px, 50vw - 24px)));
   overflow: hidden;
   border: 1px solid #111;
   border-radius: 6px;
@@ -224,6 +227,7 @@ h1 {
 .app-stage {
   position: relative;
   aspect-ratio: 16 / 9;
+  max-height: calc(100vh - 140px);
   background: #191919;
 }
 

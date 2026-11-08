@@ -21,6 +21,49 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Changed (pin `f4ffe6e`)
+
+- godot-uxml moved to `f4ffe6e` (requests R17, R27, R28 and R29 done; selector
+  and rule edits reload in place).
+- The library search and the command palette search are live TextFields
+  (no `is-delayed`). godot-uxml keeps the caret (R27); the editor reads the
+  text through `value_changed`. The workaround `EdUi.live_text()` is removed.
+- The inspector sets placeholders with `set_field_placeholder` (R28), and
+  godot-uxml elides them (R18, `text-overflow: ellipsis` on `.field`).
+  `EdUi.elided_placeholder()`, `EdUi.set_silent()` and the refit at a pane
+  resize are removed.
+- A scroll of the hierarchy lays out only the rows (R29). The hierarchy still
+  scrolls after a frame without another selection: the rebind of the rows
+  costs about 16 ms native and 50 ms GDScript on the large document.
+- `EdRenderHost.last_modes` records the reload mode of each changed file,
+  `"rules"` included. Every mode of `reload_stylesheet` keeps the controls
+  and the forced states.
+- The toolbar and the status line show the folder name of the project, not
+  the path. The tooltip of the toolbar label shows the path.
+- `bench/frame_cost.gd` measures typing in the library search and two
+  hierarchy scrolls.
+- Forcing a state in the state-machine panel lays out no inspector: the
+  winner row of the declaration list is no longer bold (a font change is not
+  paint-only, request R31). GDScript: 65.7 -> 16.2 ms on the menu fixture,
+  207 -> 108 ms on the large document. A scroll of the hierarchy on the large
+  document: 61 -> 1 window layouts in 60 frames, 48.6 -> 8.2 ms GDScript.
+  Selection costs 4-5 ms more native (`set_field_placeholder`, request R30).
+  The figures are in `docs/roadmap.md`.
+- New godot-uxml requests R30-R32 (`docs/godot-uxml-requests.md`).
+
+### Fixed
+
+- Web: the editor did not scale on a high-DPI screen. The content scale of
+  the window is now `window.devicePixelRatio`.
+- Web: a poll of the watch timer that ended during a save woke the save
+  without its answer, so the save stopped ("no answer") or asked before an
+  overwrite. Each request now waits for its own answer.
+- In a small window (the editor in the project site), the source view was a
+  few characters wide. The fixed panes now get smaller in a small window
+  (`EdMain._fit_splits`); the saved sizes stay.
+- Site: the editor in the page is wider (up to 1600 px), and the hero
+  screenshot shows the sample project without a local path.
+
 ### Added (Godot rebuild, milestone 8)
 
 - Command palette (Ctrl+Shift+P): every editor command with a fuzzy search.

@@ -12,8 +12,8 @@ below. Screenshots: `docs/screenshots/m2-*.png`, `m3-*.png`, `m4-*.png`,
 pass (see "Frame cost" below). Before milestone 4 the pin moved to
 godot-uxml `6137987` (requests R1-R14), and the editor replaced every
 workaround with the godot-uxml editor APIs (see "Re-pin" below). Before
-milestone 7 the pin moved to `dc2c081` (R15, R16, R11), and before milestone 8
-to `1167eb1` (R17-R26).
+milestone 7 the pin moved to `dc2c081` (R15, R16, R11), before milestone 8
+to `1167eb1` (R17-R26), and after milestone 8 to `f4ffe6e` (R17, R27-R29).
 
 The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
@@ -405,6 +405,72 @@ machine during the runs.
 - **Field values** through `set_field_value` cost about 0.15 ms each against
   0.02 ms for a direct `LineEdit` write: selection on the menu fixture went from
   9.8 to 10.4-10.7 ms native.
+
+## Re-pin to godot-uxml f4ffe6e and the site fixes (done)
+
+The pin moved from `1167eb1` to `f4ffe6e` (R17, R27, R28, R29, and selector
+and rule edits that reload in place).
+
+- **R27.** The library search and the command palette search are live
+  TextFields; godot-uxml keeps the caret. `EdUi.live_text()` is removed.
+- **R28.** The inspector placeholders go through `set_field_placeholder`, and
+  godot-uxml elides them (R18). `EdUi.elided_placeholder()`,
+  `EdUi.set_silent()` and the refit at a resize are removed. The write costs
+  more than the direct `LineEdit` write of before (R30).
+- **R29.** A scroll of the hierarchy lays out only the rows. The window layouts
+  of 60 scroll frames on the large document: 61 -> 1. The rebind of the rows
+  still costs about 16 ms native and 50 ms GDScript, so the hierarchy keeps
+  the scroll after a frame without another selection.
+- **R17.** A Toggle value lays out nothing. Forcing a state still laid out the
+  inspector: the winner row of the declaration list was bold, and a font
+  change is not paint-only (R31). The winner row is now only brighter. The
+  inspector layouts of 60 forced states: 61 -> 0.
+- **Selector reloads.** `get_last_reload_mode()` can return `"rules"`. The
+  editor does not branch on the mode; `EdRenderHost.last_modes` records it.
+
+`bench/frame_cost.gd`, one run per path, median (p95 in the logs) in ms per
+frame: before (`3e0c8fb`, pin `1167eb1`, with the new scenarios of the
+benchmark) -> after. Other agents loaded the machine during the runs.
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| states: force a node | 18.3 -> 13.7 | 65.7 -> 16.2 | 24.0 -> 18.0 | 207 -> 108 |
+| states: play an edge | 13.5 -> 12.7 | 23.2 -> 14.2 | 26.3 -> 25.5 | 198 -> 156 |
+| typing in the library search | 16.4 -> 14.4 | 80.3 -> 75.9 | 16.2 -> 16.3 | 96.6 -> 94.3 |
+| typing in the source view | 0.97 -> 0.87 | 0.86 -> 0.84 | 1.01 -> 0.99 | 1.00 -> 1.03 |
+| hierarchy: scroll offset | 0.12 -> 0.11 | 0.11 -> 0.11 | 5.94 -> 3.21 | 48.6 -> 8.17 |
+| hierarchy: scroll_to_item far and back | 0.13 -> 0.12 | 0.12 -> 0.12 | 16.6 -> 16.9 | 81.0 -> 49.5 |
+| window layouts in 60 scroll frames | 1 -> 1 | 1 -> 1 | 61 -> 1 | 61 -> 1 |
+| selection | 11.8 -> 15.7 | 18.3 -> 18.4 | 13.2 -> 18.6 | 20.2 -> 23.6 |
+| timeline: release of a bar drag | 15.2 -> 12.0 | 21.7 -> 17.8 | 58.5 -> 65.1 | 483 -> 486 |
+
+- **Forcing a state** on the GDScript path: 62 ms (M8) and 65.7 ms (this run,
+  before) -> 16.2 ms on the menu fixture; 207 -> 108 ms on the large document.
+  The rest on the large document is the restyle of the canvas.
+- **Typing in the library search** lays out the whole window twice per key
+  (120 layouts in 60 frames, on both pins): each key gives the tree a new
+  source (R32). The caret fix (R27) changes no cost.
+- **Selection** costs more: about 70 `set_field_placeholder` calls per
+  selection cost about 4-5 ms native and up to 13 ms GDScript more than the
+  direct writes of before (R30). The menu fixture on the GDScript path did not
+  change in this run.
+- The menu fixture has too few rows to scroll the hierarchy.
+
+**Site fixes.**
+
+- The web export draws at `window.devicePixelRatio` (the content scale of the
+  window), so the text is sharp on a high-DPI screen.
+- In a small window the fixed panes get smaller (`EdMain._fit_splits`): the
+  source view keeps at least 340 px. In the 1240 × 698 frame of the site the
+  source view was about 100 px wide; it is now 335 px. The page also makes the
+  frame wider, up to 1600 px.
+- The toolbar shows the folder name of the project, not its path. The
+  screenshots are taken again; the hero shows the sample project of the site.
+- Web: a poll of the watch timer during a save woke the save without its
+  answer. Each request now waits for its own answer.
+
+Not done: the canvas of the edited document renders at the document size, so
+a device scale of 2 scales its texture. R30-R32 are open upstream.
 
 ## M8. Packaging and the web export (done)
 

@@ -97,7 +97,7 @@ func open_project(dir: String) -> bool:
 	project_opened.emit()
 	tabs_changed.emit()
 	var uxml := workspace.paths_with_extension(".uxml")
-	status.emit("Opened %s: %d UXML and %d USS files%s." % [dir, uxml.size(), files.size() - uxml.size(),
+	status.emit("Opened %s: %d UXML and %d USS files%s." % [EdMain.project_label(dir), uxml.size(), files.size() - uxml.size(),
 		"" if failed == 0 else ", %d unreadable" % failed], failed > 0)
 	_open_journal()
 	return true

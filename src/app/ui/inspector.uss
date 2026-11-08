@@ -63,6 +63,8 @@
 .field {
     flex-grow: 1;
     flex-shrink: 1;
+    /* godot-uxml elides a long placeholder (R18). */
+    text-overflow: ellipsis;
     margin-top: 1px;
     margin-bottom: 1px;
 }
@@ -198,9 +200,10 @@
     margin-left: 0;
 }
 
+/* No -unity-font-style here: a font change of a row is not paint-only and
+   lays out the whole inspector (about 25 ms GDScript for each forced state). */
 .status-winner {
-    color: rgb(140, 220, 140);
-    -unity-font-style: bold;
+    color: rgb(150, 235, 150);
 }
 
 .status-overridden {

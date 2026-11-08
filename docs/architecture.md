@@ -463,14 +463,25 @@ dragline, and no model is built.
   the sizes before the first layout, as numbers between 40 and 4000 px. The
   timeline options (loop, speed, scope) use the same file. The test runner
   and the benchmark use a file of their own.
+- **Small windows.** The defaults are for 1600 × 900. `_fit_splits()` runs at
+  the start and at each change of the window size. It makes a fixed pane
+  smaller when the window is small (a laptop, the editor in the project
+  site): the left column and the inspector together take at most half of the
+  width, the source view keeps at least 340 px beside the diagnostics, and the
+  canvas keeps at least half of the height. A pane never gets larger than its
+  wanted size (the saved size, or the size of the document). A save keeps the
+  wanted size of a pane that the fit made smaller; a pane that the user drags
+  keeps the new size.
+- **Project name.** The toolbar shows the folder name of the project, and
+  its tooltip the whole path. The status line after an open also shows the
+  folder name. A screenshot shows no local path.
 - **Long texts.** A `Label` or `Button` with `overflow: hidden` and
   `text-overflow: ellipsis` ends in `...`, and its tooltip has the whole
   text. godot-uxml elides at each layout and at each text change. A
-  `LineEdit` placeholder does not elide in Godot:
-  `EdUi.elided_placeholder()` shortens it at the width of the field, and
-  the inspector does this again when the fields change width. godot-uxml
-  elides a placeholder now (R18), but only one that changes through the
-  model, which restyles the field (request R28).
+  `LineEdit` placeholder does not elide in Godot; godot-uxml elides the
+  placeholder of a field with `text-overflow: ellipsis` (R18), also after a
+  pane resize. The inspector fields have it (`.field`) and get their
+  placeholder through `set_field_placeholder`, which runs no restyle (R28).
   The value-origin labels are such placeholders. The row labels of the
   inspector have a relative `flex-basis` (45%, at most 150 px), so a narrow
   pane keeps room for the fields, and a new name needs no layout. Rows of the lists and trees elide through the
@@ -497,7 +508,7 @@ The inspector is a second godot-uxml document. The editor generates its
 UXML once (a skeleton with fixed rows for the common attributes and style
 properties, pairs of extra rows, one block per class and declaration rows) and
 then changes it in place for each selection: field values go through
-`set_field_value` (request R17), placeholders to the `LineEdit` controls, row names and declaration
+`set_field_value` (request R17), placeholders through `set_field_placeholder` (R28), row names and declaration
 texts go through `set_text` to `Label` and `Button` controls of a size that does
 not follow the text, and unused rows are `visibility: hidden` (see "Rows in
 use"). A selection needs few restyles and no layout (requests R15, R17 and R22
@@ -521,8 +532,6 @@ one is mounted into a `*-host` element of the window document:
 | `Button.self_modulate` | inspector colour swatch | the computed colour without a restyle per selection (a ColorField value restyles, request R17) |
 | `IMGUIContainer` draw callback | timeline tracks, easing curves, state-machine graph | bars, curves, arrows and the playhead are drawings; the element stays in the UXML document, and godot-uxml has no vector shape element for a curve or an arrow |
 | `Popup` | easing picker | the window of the picker, as `UxmlPopupMenu` has one; the content is a godot-uxml document |
-| `LineEdit.placeholder_text` | value-origin labels of the inspector; the search of the command palette per mode | set directly and shortened by the editor (request R28) |
-| `LineEdit.text_changed`, `caret_column` | library search, command palette search | live text as the user types, and the caret after the restyle of a change (request R27) |
 | `JavaScriptBridge` | web project host (`EdWebHost`, `web_host.js`) | the File System Access API, the zip input and the download; a browser API, not UI |
 | `EdCanvasView._draw` | selection outlines, handles, snap guides, the drop hint, the preview badge | drawn over the SubViewport texture at the canvas zoom; not document content |
 
@@ -594,11 +603,23 @@ as base64 in JSON.
   project zip** and **Download the project as a zip** are commands of the
   palette.
 - The first UXML document opens after the project opens.
+- **High-DPI screens.** The canvas element of the page has device pixels.
+  `EdMain._scale_to_device()` sets the content scale of the window to
+  `window.devicePixelRatio`, as the web demo of godot-uxml does. The editor
+  then draws at its CSS size, with sharp text. The canvas of the edited
+  document is a SubViewport at the document size; the zoom of the canvas
+  scales its texture.
+- **Requests to the script.** Each request (`stat`, `write`) waits for its
+  own answer. One signal (`disk_checked`) comes for every answer, and a poll
+  of the watch timer can end while a save waits.
 - `tools/web_smoke.cjs` runs the export in headless Chrome or Edge: the zip
   path (open, edit through the palette, Ctrl+S, the downloaded zip has the
   edit and the other files keep their bytes) and the File System Access path
   on the origin private file system (open, edit, save, and a change on disk
-  that stops the save).
+  that stops the save), and the sample project (`?sample=sample`): the device
+  scale, and the width of the source view at 1600 × 900 and at 1240 × 698.
+  `--scale=2` sets a device scale factor of 2; `--url=` runs the checks on a
+  deployed site.
 
 ## Projects and saving
 
@@ -673,7 +694,11 @@ that keep a frame cheap:
 - A timeline bar drag writes once, at the release; the partial stylesheet
   reload of godot-uxml restyles only the elements of the changed rules.
 - The hierarchy scrolls to a selection only when its row is outside the view,
-  and only after a frame without another selection (request R29).
+  and only after a frame without another selection. A scroll lays out only the
+  rows of the hierarchy (godot-uxml R29), but the rebind of the rows costs
+  about 16 ms native on a 500-element document.
+- The rows of the declaration list change only paint-only properties with
+  their status (no `-unity-font-style`, request R31).
 - The command palette loads at its first open; while closed it costs nothing.
 - The state-machine graph builds on a frame without a change, and only while
   the panel is open.
@@ -743,7 +768,8 @@ by its PID.
   the fuzzy ranking, the shortcut map; in the window: the palette loads at the
   first open, typing filters, Enter runs one undo step, arrow keys, a click
   outside, the map and the Edit menu show a rebinding, every command runs, and
-  typing into the library search keeps the order of the characters (R27).
+  typing into the library search and the palette search keeps the order of the
+  characters (R27).
 - Web host (`test_web_host.gd`, a fake of `web_host.js`): a directory opens as
   a copy, a save writes the disk, a disk change before a save asks before an
   overwrite, a disk change during a save keeps the edit unsaved, a failed

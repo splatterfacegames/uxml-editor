@@ -4,10 +4,13 @@
 //   npm install playwright-core            (once, anywhere on NODE_PATH)
 //   godot --headless --path . --export-release Web build/web/index.html
 //   node tools/web_smoke.cjs [--browser=<chrome.exe>] [--out=<dir>]
+//        [--web=<dir>] [--url=<editor url>] [--scale=<n>] [--sample=<name>]
 //
-// The script serves build/web on a local port (no cross-origin isolation
-// headers: the export has no threads), opens it in Chrome or Edge (headless)
-// and checks two paths:
+// The script serves build/web (or --web) on a local port (no cross-origin
+// isolation headers: the export has no threads), or uses --url (for example
+// https://uxml-editor.splatterfacegames.com/editor/), opens it in Chrome or
+// Edge (headless) at a device scale factor of --scale (default 1) and checks
+// three paths:
 //
 // 1. Zip fallback (`?host=zip`): a zip of fixtures/projects/menu goes into
 //    the zip input, the editor opens it, an element is duplicated through the
@@ -17,6 +20,10 @@
 //    origin private file system with the menu fixture. Open, edit, save: the
 //    file on "disk" has the edit. Then a change on disk before a save: the
 //    editor refuses to overwrite it and asks.
+//
+// 3. The sample project (`?sample=<name>`, default "sample"; skipped when
+//    the export has no samples folder): it opens, the editor draws at the
+//    device scale (window.devicePixelRatio), and the source view has room.
 //
 // Screenshots go to --out (default docs/screenshots). Exit code 0 when every
 // check passes.
@@ -28,9 +35,15 @@ const zlib = require("zlib");
 const { chromium } = require("playwright-core");
 
 const REPO = path.resolve(__dirname, "..");
-const WEB = path.join(REPO, "build", "web");
+const args = Object.fromEntries(process.argv.slice(2).map((a) => {
+  const i = a.indexOf("=");
+  return i < 0 ? [a.replace(/^--/, ""), "true"] : [a.slice(0, i).replace(/^--/, ""), a.slice(i + 1)];
+}));
+const WEB = path.resolve(args.web || path.join(REPO, "build", "web"));
+const URL_BASE = args.url || "";
+const SCALE = Number(args.scale || 1);
+const SAMPLE = args.sample || "sample";
 const FIXTURE = path.join(REPO, "fixtures", "projects", "menu");
-const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/, "").split("=")));
 const OUT = path.resolve(args.out || path.join(REPO, "docs", "screenshots"));
 const BROWSERS = [
   args.browser,
@@ -141,7 +154,7 @@ async function waitLog(logs, text, ms) {
 }
 
 async function boot(browser, url, init) {
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, acceptDownloads: true });
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: SCALE, acceptDownloads: true });
   if (init) await ctx.addInitScript(init);
   const page = await ctx.newPage();
   const logs = [];
@@ -173,22 +186,26 @@ async function duplicateSelection(page) {
     console.error("no Chrome or Edge found; pass --browser=<path>");
     process.exit(2);
   }
-  if (!fs.existsSync(path.join(WEB, "index.html"))) {
-    console.error("build/web/index.html is missing: export the Web preset first");
+  if (!URL_BASE && !fs.existsSync(path.join(WEB, "index.html"))) {
+    console.error(WEB + "/index.html is missing: export the Web preset first");
     process.exit(2);
   }
   fs.mkdirSync(OUT, { recursive: true });
-  const server = await serve();
-  const base = "http://127.0.0.1:" + server.address().port + "/";
+  const server = URL_BASE ? null : await serve();
+  const base = URL_BASE || "http://127.0.0.1:" + server.address().port + "/";
+  const withQuery = (q) => base + (base.includes("?") ? "&" : "?") + q;
+  const hasSample = URL_BASE || fs.existsSync(path.join(WEB, "samples", SAMPLE + ".zip"));
   const browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
-  console.log("browser " + exe + ", " + base);
+  console.log("browser " + exe + ", " + base + ", device scale " + SCALE);
   const files = fixtureFiles();
   try {
     // ---- 1. zip fallback -------------------------------------------------
     {
-      const { ctx, page, logs, started } = await boot(browser, base + "?host=zip");
+      const { ctx, page, logs, started } = await boot(browser, withQuery("host=zip"));
       check(started, "the editor starts in the browser (GDScript core, Compatibility renderer)");
-      check(logs.some((l) => l.includes("core GDScript")), "the GDScript core runs: " + (logs.find((l) => l.includes("UXML Editor ready")) || ""));
+      const ready = logs.find((l) => l.includes("UXML Editor ready")) || "";
+      check(ready.includes("core GDScript"), "the GDScript core runs: " + ready);
+      check(ready.includes("scale " + SCALE.toFixed(2)), "the content scale is the device pixel ratio " + SCALE);
       await page.screenshot({ path: path.join(OUT, "m8-web-start.png") });
       const zip = makeZip(files.map(([r, d]) => ["menu/" + r, d]));
       const zipPath = path.join(REPO, "build", "menu-smoke.zip");
@@ -246,7 +263,9 @@ async function duplicateSelection(page) {
       await duplicateSelection(page);
       check(await waitLog(logs, "web: history Duplicate Button", 10000), "the edit");
       await page.keyboard.press("Control+S");
-      check(await waitLog(logs, "web: wrote Assets/UI/Menu.uxml", 15000), "Ctrl+S writes the file");
+      const wrote = await waitLog(logs, "web: wrote Assets/UI/Menu.uxml", 15000);
+      check(wrote, "Ctrl+S writes the file");
+      if (!wrote) console.log("  last log lines:\n    " + logs.slice(-15).join("\n    "));
       const onDisk = await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
         const d = await (await (await root.getDirectoryHandle("menu")).getDirectoryHandle("Assets")).getDirectoryHandle("UI");
@@ -281,12 +300,43 @@ async function duplicateSelection(page) {
       await page.screenshot({ path: path.join(OUT, "m8-web-conflict.png") });
       await ctx.close();
     }
+    // ---- 3. the sample project, the device scale and the panes -----------
+    if (hasSample) {
+      const { ctx, page, logs, started } = await boot(browser, withQuery("sample=" + SAMPLE));
+      check(started, "the editor starts with ?sample=" + SAMPLE);
+      check(await waitLog(logs, "web: opened " + SAMPLE + " (zip)", 30000), "the sample project opens");
+      check(await waitLog(logs, "web: rendered ", 20000), "the canvas renders a document of the sample");
+      await sleep(1000);
+      const canvas = await page.evaluate(() => {
+        const c = document.querySelector("canvas");
+        return c ? { w: c.width, cw: c.clientWidth, dpr: window.devicePixelRatio } : null;
+      });
+      check(!!canvas && Math.abs(canvas.w - canvas.cw * SCALE) <= 2, "the canvas has device pixels: " + JSON.stringify(canvas));
+      await page.evaluate(() => window.uxmlSmoke && window.uxmlSmoke("layout"));
+      await waitLog(logs, "web: layout ", 5000);
+      const layout = logs.find((l) => l.includes("web: layout ")) || "";
+      const m = layout.match(/scale ([\d.]+) view (\d+)x(\d+) source (\d+) inspector (\d+)/);
+      check(!!m && Math.abs(Number(m[1]) - SCALE) < 0.01 && Number(m[2]) === 1600, "the editor draws at the CSS size: " + layout);
+      check(!!m && Number(m[4]) >= 300, "the source view has room: " + layout);
+      await page.screenshot({ path: path.join(OUT, "web-sample" + (SCALE !== 1 ? "@" + SCALE + "x" : "") + ".png") });
+      // The size of the editor in the project site (1240 x 698 CSS px).
+      await page.setViewportSize({ width: 1240, height: 698 });
+      await sleep(1500);
+      logs.length = 0;
+      await page.evaluate(() => window.uxmlSmoke && window.uxmlSmoke("layout"));
+      await waitLog(logs, "web: layout ", 5000);
+      const small = logs.find((l) => l.includes("web: layout ")) || "";
+      const ms = small.match(/source (\d+)/);
+      check(!!ms && Number(ms[1]) >= 300, "at 1240 x 698 the source view keeps room: " + small);
+      await page.screenshot({ path: path.join(OUT, "web-sample-1240" + (SCALE !== 1 ? "@" + SCALE + "x" : "") + ".png") });
+      await ctx.close();
+    }
   } catch (e) {
     console.error(e);
     failures++;
   } finally {
     await browser.close();
-    server.close();
+    if (server) server.close();
   }
   console.log(failures === 0 ? "web smoke: all checks passed" : "web smoke: " + failures + " failed");
   process.exit(failures === 0 ? 0 : 1);

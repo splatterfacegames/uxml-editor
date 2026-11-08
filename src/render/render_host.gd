@@ -39,6 +39,11 @@ var patches := 0
 ## The last update kept the controls (an in-place replace or a stylesheet
 ## reload only).
 var last_was_patch := false
+## The paths of the last update(): the reload mode of each changed
+## stylesheet ("restyle", "rules", "cascade" or "full", from
+## get_last_reload_mode()), and "in-place" or "reload" for a document.
+## Every mode keeps the forced states except a document "reload".
+var last_modes: Dictionary = {}
 var entry_path: String = ""
 var _root: String = ""
 var _theme_loaded := ""
@@ -173,6 +178,7 @@ func update(ws: EdWorkspace, entry: String) -> bool:
 		_resolver.set_override(_root + "/" + p, _texts[p])
 	var replace := false
 	var kept := true
+	last_modes = {}
 	for p in changed:
 		if p == entry or p.to_lower().ends_with(".uxml"):
 			replace = true
@@ -182,11 +188,14 @@ func update(ws: EdWorkspace, entry: String) -> bool:
 			# ERR_DOES_NOT_EXIST: the document does not use the sheet.
 			if err != OK and err != ERR_DOES_NOT_EXIST:
 				return false
+			if err == OK:
+				last_modes[p] = doc.get_last_reload_mode()
 	if replace:
 		var err := doc.replace_source(_texts[entry])
 		if err != OK:
 			return false
 		kept = doc.get_last_replace_mode() == "in-place"
+		last_modes[entry] = doc.get_last_replace_mode()
 	_after_load(ws, entry, kept)
 	if kept:
 		patches += 1

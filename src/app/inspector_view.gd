@@ -105,8 +105,6 @@ var _unused: Dictionary = {}
 var _state_rules: Dictionary = {}
 var _scroll_rules := false
 var easing_picker: EdEasingPicker = null
-## field -> the placeholder before elision.
-var _placeholder_full: Dictionary = {}
 
 
 func _init() -> void:
@@ -471,12 +469,6 @@ func _build_skeleton(attr_pool: int, style_pool: int, class_pool: int) -> void:
 		doc.set_scroll_offset("scroll", offset)
 	doc.set_imgui_handler("easing-curve", _draw_easing, _on_easing_input)
 	_easing_shown = ""
-	_placeholder_full.clear()
-	# All fields of a kind have one width: one signal per kind is enough.
-	for field in ["style-0", "attr-0"]:
-		var fc := doc.get_native(field)
-		if fc != null:
-			fc.resized.connect(_refit_placeholders, CONNECT_DEFERRED)
 	# A style field with the focus lists its declarations.
 	for i in COMMON_STYLES.size() + style_pool:
 		var c := doc.get_native("style-%d" % i)
@@ -517,7 +509,7 @@ func _row(out: PackedStringArray, kind: String, i: int, row_class: String) -> vo
 				out.append("<ui:Button name=\"pick-%s\" class=\"helper\" text=\"∿\" tooltip=\"Choose an easing curve\" />" % field)
 			_:
 				out.append("<ui:VisualElement class=\"helper-space\" />")
-	out.append("<ui:TextField name=\"%s\" value=\"\" placeholder-text=\"\" is-delayed=\"true\" class=\"field\" />" % field)
+	out.append("<ui:TextField name=\"%s\" value=\"\" placeholder-text=\"\" is-delayed=\"true\" display-tooltip-when-elided=\"false\" class=\"field\" />" % field)
 	out.append("<ui:Button name=\"remove-%s\" class=\"remove invisible\" text=\"×\" tooltip=\"Remove\" />" % field)
 	out.append("</ui:VisualElement>")
 	# The easing curve of the timing function (milestone 6).
@@ -694,8 +686,11 @@ func _value(field: String, value: String, placeholder: String = "") -> void:
 	var c := doc.get_native(field) as LineEdit
 	if c == null:
 		return
-	_placeholder_full[field] = placeholder
-	_show_placeholder(field, c, placeholder)
+	# set_field_placeholder: no restyle (godot-uxml R28). The field has
+	# `text-overflow: ellipsis`, so godot-uxml elides the text to the width
+	# of the field, also after a resize (R18).
+	if doc.get_field_placeholder(field) != placeholder:
+		doc.set_field_placeholder(field, placeholder)
 	# The whole value (or the computed value and its origin) as the
 	# tooltip: a long placeholder elides, and a narrow field cuts a value off.
 	var tip := value if not value.is_empty() else placeholder
@@ -707,26 +702,9 @@ func _value(field: String, value: String, placeholder: String = "") -> void:
 		doc.set_field_value(field, value)
 
 
-## The placeholder at the width of the field: a text that does not fit
-## ends in "...". The tooltip of the field has the whole text.
-func _show_placeholder(field: String, c: LineEdit, full: String) -> void:
-	var shown := EdUi.elided_placeholder(c, full)
-	if c.placeholder_text != shown:
-		c.placeholder_text = shown
-		_silent(field, "placeholder-text", shown)
-
-
-## The fields changed width (a pane resize, the first layout).
-func _refit_placeholders() -> void:
-	for field in _placeholder_full:
-		var c := doc.get_native(field) as LineEdit
-		if c != null:
-			_show_placeholder(field, c, _placeholder_full[field])
-
-
 ## The whole placeholder of a field (also while it is elided).
 func placeholder_of(field: String) -> String:
-	return String(_placeholder_full.get(field, ""))
+	return doc.get_field_placeholder(field) if doc != null else ""
 
 
 ## Show the current state of the selection again (the end of a timeline
@@ -748,10 +726,6 @@ func _toggle(field: String, on: bool) -> void:
 	_written[field] = w
 	if doc.get_field_value(field) != on:
 		doc.set_field_value(field, on)
-
-
-func _silent(el_name: String, attr: String, value: String) -> void:
-	EdUi.set_silent(doc, el_name, attr, value)
 
 
 ## A label or button text. The labels that change per selection have a
@@ -1385,9 +1359,9 @@ func open_provenance(i: int) -> void:
 func _pick_attr(nm: String) -> void:
 	_set_text_of("new-attr-name", nm)
 	var hint := attribute_hint(_node.local, nm)
+	doc.set_field_placeholder("new-attr-value", "value" if hint.is_empty() else hint)
 	var vc := doc.get_native("new-attr-value") as LineEdit
 	if vc != null:
-		vc.placeholder_text = "value" if hint.is_empty() else hint
 		vc.grab_focus()
 
 

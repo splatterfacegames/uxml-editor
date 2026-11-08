@@ -4,8 +4,9 @@ UXML Editor is a visual editor for Unity UI Toolkit documents (UXML) and
 stylesheets (USS). The editor is a Godot 4.7 application.
 [godot-uxml](https://github.com/splatterfacegames/godot-uxml) renders the documents.
 
-> The `godot` branch holds the Godot rebuild. The `main` branch holds the
-> previous React and Tauri editor.
+> The `main` branch holds the Godot rebuild. The `godot` branch follows
+> `main`. The previous React and Tauri editor is in the history before the
+> merge of the rebuild.
 
 ![The editor with the menu fixture: project, hierarchy and library on the
 left, the canvas with a resize in progress and a snap guide in the
@@ -148,8 +149,11 @@ message. Such an edit changes no file and adds no undo step.
   opens a picker with the curve of every Unity easing keyword.
 - **Panel layout.** Drag a split line to change the size of a pane. The
   editor keeps the sizes for the user (`user://settings.cfg`, or
-  `--settings=<file>`). A long text ends in `...`, and its tooltip shows
-  the whole text.
+  `--settings=<file>`). In a small window (a laptop, the editor in the
+  project site) the fixed panes get smaller, so the canvas and the source
+  view keep room; the saved sizes stay. A long text ends in `...`, and its
+  tooltip shows the whole text. The toolbar shows the folder name of the
+  project; the tooltip shows the whole path.
 - **Undo.** One history records the edits of all views and all tabs.
   An undo of an edit in another document shows the tab of that document
   (`docs/adr/0008-tabs-and-history.md`).
@@ -219,6 +223,9 @@ message. Such an edit changes no file and adds no undo step.
 | `docs/screenshots/m8-web-edited.png` | The web export in Chrome: a project from a zip, a button duplicated through the palette. |
 | `docs/screenshots/m8-web-fs-saved.png` | The web export with the File System Access API after a save. |
 | `docs/screenshots/m8-web-conflict.png` | The web export: a file changed on disk, and the editor asks before an overwrite. |
+| `docs/screenshots/web-sample.png` | The web export with the sample project of the site (`?sample=sample`). |
+| `docs/screenshots/web-sample-1240.png` | The same at 1240 × 698, the size of the editor in the site: the fixed panes are smaller, and the source view keeps room. |
+| `docs/screenshots/web-sample-1240@2x.png` | The same at a device scale factor of 2: the editor draws at the device pixel ratio. |
 
 ## Requirements
 
@@ -293,7 +300,8 @@ without a file picker. The project site
 (https://uxml-editor.splatterfacegames.com, built by `site/build.sh`)
 bundles `sample.zip`: the menu, options and nested-styles fixtures in one
 project. A browser has no system fonts: a subset of DejaVu Sans
-(`src/app/fonts`) gives the symbols that Inter lacks.
+(`src/app/fonts`) gives the symbols that Inter lacks. On a high-DPI screen the
+editor draws at the device pixel ratio of the browser, so the text is sharp.
 
 The smoke test opens the export in headless Chrome or Edge and checks both
 ways:
@@ -301,7 +309,16 @@ ways:
 ```
 npm install playwright-core
 node tools/web_smoke.cjs
+node tools/web_smoke.cjs --scale=2
+node tools/web_smoke.cjs --url=https://uxml-editor.splatterfacegames.com/editor/ --out=<dir>
 ```
+
+`--web=<dir>` serves another export folder. `--scale=<n>` sets the device
+scale factor of the browser. `--url=<address>` runs the checks on a deployed
+editor instead of a local folder. `--out=<dir>` sets the folder of the
+screenshots (default `docs/screenshots`). With a `samples/sample.zip` in the
+export (or with `--url`), the smoke test also opens the sample and checks the
+device scale and the width of the source view.
 
 ## Run the editor from the source
 
@@ -388,7 +405,8 @@ godot --headless --path . -s res://tests/run_tests.gd -- --gdscript
 
 The second command uses the native core of godot-uxml. The third command
 uses the GDScript path. The CI workflow (`.github/workflows/ci.yml`) runs the
-GDScript path on Linux and both paths on Windows for each push to `godot`. Add `--filter=<text>` to run only the tests with
+GDScript path on Linux and both paths on Windows for each push to `main` and
+`godot`. Add `--filter=<text>` to run only the tests with
 that text in the file or test name. The exit code is the number of failed
 tests. One recovery test starts an editor in a child process and stops
 the process by its process ID.

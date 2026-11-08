@@ -310,6 +310,41 @@ func test_render_host_partial_updates() -> void:
 	await frames()
 	eq(host.renders, r0 + 1, "no full load for a USS edit")
 	eq(host.computed_style(node_named(m, "quit-button").id)["min-width"]["value"], "99px")
+	eq(host.last_modes, {MENU_USS: "restyle"}, "a declaration edit restyles")
+
+
+func test_a_selector_edit_reloads_the_rules_in_place() -> void:
+	# godot-uxml f4ffe6e: a selector or rule edit compiles the rules in place
+	# (reload mode "rules"). The controls and the forced states stay.
+	var m := await editor()
+	var host := m.canvas.host
+	var quit := node_named(m, "quit-button")
+	host.set_forced(quit.id, ["hover"])
+	await frames()
+	var control: Control = host.doc.get_native("quit-button")
+	var r0 := host.renders
+	var p0 := host.patches
+	var text := m.state.workspace.text(MENU_USS)
+	var at := text.find(".menu-button {")
+	ok(at >= 0, "the fixture has the rule")
+	var sel := ".menu-button"
+	m.state.execute(EdTransaction.make("test", "Selector", MENU_USS, [{"start": at, "end": at + sel.length(), "replacement": ".menu-button, .other"}]), "test")
+	await frames()
+	eq(host.last_modes, {MENU_USS: "rules"}, "a selector edit takes the rules path")
+	eq([host.renders, host.patches], [r0, p0 + 1], "a patch, no full load")
+	ok(host.doc.get_native("quit-button") == control, "the control stays")
+	eq(host.forced_of(quit.id), ["hover"], "the forced state stays")
+	eq(Array(host.doc.get_forced_states(host.element_for_node[quit.id])), ["hover"], "in godot-uxml too")
+	eq(host.computed_style(quit.id)["min-width"]["value"], "180px", "the rule still applies")
+	# A new rule at the end: the rules path too.
+	text = m.state.workspace.text(MENU_USS)
+	m.state.execute(EdTransaction.make("test", "Rule", MENU_USS, [{"start": text.length(), "end": text.length(), "replacement": "
+#quit-button { min-width: 77px; }
+"}]), "test")
+	await frames()
+	eq(host.last_modes, {MENU_USS: "rules"}, "a new rule takes the rules path")
+	eq(host.computed_style(quit.id)["min-width"]["value"], "77px", "the new rule applies")
+	eq(host.renders, r0, "still no full load")
 
 
 func test_render_host_maps_template_clones_to_the_instance() -> void:

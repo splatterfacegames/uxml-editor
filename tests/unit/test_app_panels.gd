@@ -419,14 +419,16 @@ func test_a_new_rule_of_a_state_is_one_rule_for_a_whole_drag() -> void:
 	eq(m.state.workspace.history.undo_depth(), 1, "one undo step")
 
 
-func test_a_selection_outside_the_hierarchy_view_scrolls_once() -> void:
+func test_a_selection_outside_the_hierarchy_view_scrolls_once_without_a_layout() -> void:
 	var dir := copy_fixture("menu")
 	var u := PackedStringArray(["<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">"])
 	for i in 80:
 		u.append("  <ui:Label name=\"l%d\" text=\"%d\" />" % [i, i])
 	u.append("</ui:UXML>")
 	var f := FileAccess.open(dir + "/Assets/UI/Long.uxml", FileAccess.WRITE)
-	f.store_string("\n".join(u) + "\n")
+	f.store_string("
+".join(u) + "
+")
 	f.close()
 	tree.root.size = Vector2i(1600, 1000)
 	var m: EdMain = load("res://src/app/main.tscn").instantiate()
@@ -435,18 +437,94 @@ func test_a_selection_outside_the_hierarchy_view_scrolls_once() -> void:
 	m.state.open_project(dir)
 	m.state.open_document("Assets/UI/Long.uxml")
 	await frames(8)
+	# The first selections lay out the window once (the inspector and the
+	# status show a selection); the rows are in view, so no scroll.
+	for i in [1, 2, 3]:
+		m.state.select_node(node_named(m, "l%d" % i), "canvas")
+		await frames(2)
+	# A selection outside the view scrolls after a frame without another
+	# selection. godot-uxml lays out only the rows (R29): the window layout
+	# count stays, the row layout count rises.
+	var layouts: int = m.shell.layout_count
+	var rows0: int = m.shell.local_layout_count
+	for i in [70, 75, 79, 10, 60]:
+		m.state.select_node(node_named(m, "l%d" % i), "canvas")
+		await frames(4)
+		var row := tree_index(m, "hierarchy-tree", node_named(m, "l%d" % i).id)
+		ok(m._row_in_view("hierarchy-tree", row), "l%d is in view: row %d, %s in %s" % [i, row, m.shell.get_item_rect("hierarchy-tree", row), m.shell.get_element("hierarchy-tree").get_global_rect()])
+	eq(m.shell.layout_count, layouts, "the scrolls lay out no window")
+	ok(m.shell.local_layout_count > rows0, "the rows are laid out alone: %d -> %d" % [rows0, m.shell.local_layout_count])
 	# A run of selections, one per frame: one scroll at the end of the run.
-	for i in [70, 75, 79]:
+	for i in [20, 25, 30]:
 		m.state.select_node(node_named(m, "l%d" % i), "canvas")
 		await tree.process_frame
 		eq(m._scroll_row >= 0, true, "l%d: the scroll waits" % i)
 	await frames(4)
-	var row := tree_index(m, "hierarchy-tree", node_named(m, "l79").id)
-	ok(m._row_in_view("hierarchy-tree", row), "the last selection is in view: row %d, %s in %s" % [row, m.shell.get_item_rect("hierarchy-tree", row), m.shell.get_element("hierarchy-tree").get_global_rect()])
 	eq(m._scroll_row, -1, "scrolled")
+	ok(m._row_in_view("hierarchy-tree", tree_index(m, "hierarchy-tree", node_named(m, "l30").id)), "the last selection is in view")
 	# A selection inside the view does not scroll.
-	var layouts: int = m.shell.layout_count
-	m.state.select_node(node_named(m, "l78"), "canvas")
-	eq(m._scroll_row, -1, "a row in view: no scroll")
+	var offset := m.shell.get_scroll_offset("hierarchy-tree")
+	var rows1: int = m.shell.local_layout_count
+	m.state.select_node(node_named(m, "l31"), "canvas")
 	await frames()
+	eq(m.shell.get_scroll_offset("hierarchy-tree"), offset, "a row in view: no scroll")
 	eq(m.shell.layout_count, layouts, "and no layout")
+	ok(m.shell.local_layout_count - rows1 <= 2, "at most the rows of the old and the new selection")
+
+
+func test_the_toolbar_shows_the_project_folder_name() -> void:
+	var m := await editor()
+	eq(EdUi.full_text(m.shell, "document-label"), m.state.store.root.get_file(), "the folder name, not the path")
+	ok(not EdUi.full_text(m.shell, "document-label").contains("/"), "no path")
+	eq(m.shell.get_native("document-label").tooltip_text, m.state.store.root, "the tooltip has the path")
+	eq(EdMain.project_label("C:/work/game/"), "game")
+	eq(EdMain.project_label("C:\\work\\game"), "game")
+	eq(EdMain.project_label("/"), "")
+
+
+func test_a_small_window_keeps_room_for_the_source_view() -> void:
+	var saved := EdSettings.default_path
+	EdSettings.default_path = "user://test-panes-%d.cfg" % Time.get_ticks_usec()
+	var path := EdSettings.default_path
+	var m := await editor()
+	# The size of the editor embedded in the project site.
+	tree.root.size = Vector2i(1240, 698)
+	await frames(4)
+	var w := 1240.0
+	var center := w - m.shell.get_split_dimension("main-split") - m.shell.get_split_dimension("right-split")
+	ok(center >= w * 0.5 - 1.0, "the center column has half of the width: %f" % center)
+	var source := center - m.shell.get_split_dimension("source-split")
+	ok(source >= 339.0, "the source view has room: %f" % source)
+	ok(m.shell.get_split_dimension("center-split") <= 349.0, "the canvas keeps half of the height")
+	ok(m.source.size.x >= 300.0, "the source control is wide: %f" % m.source.size.x)
+	# A save keeps the wanted sizes, not the sizes of the small window.
+	m.save_splits()
+	eq(EdSettings.new(path).get_value("layout", "right-split"), 440.0, "the wanted inspector width is saved")
+	eq(EdSettings.new(path).get_value("layout", "source-split"), 440.0)
+	# A large window again: the wanted sizes.
+	tree.root.size = Vector2i(1600, 1000)
+	await frames(4)
+	eq(m.shell.get_split_dimension("right-split"), 440.0, "the inspector is wide again")
+	eq(m.shell.get_split_dimension("source-split"), 440.0)
+	EdSettings.default_path = saved
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func test_forcing_states_lays_out_no_inspector() -> void:
+	# A row of the declaration list changes its status class. A font change
+	# of a row is not paint-only and would lay out the whole inspector.
+	var m := await editor()
+	m.state.select_node(node_named(m, "play-button"), "canvas")
+	m.states.set_open(true)
+	await frames(6)
+	m.states.select_node("hover")
+	await frames(3)
+	var d := m.inspector.doc
+	var lay: int = d.layout_count
+	for id in ["active", "focus", "checked", "disabled", "normal", "hover"]:
+		m.states.select_node(id)
+		await frames(2)
+	eq(d.layout_count, lay, "no layout of the inspector for six forced states")
+	m.states.clear()
+	m.states.set_open(false)
+	await frames()

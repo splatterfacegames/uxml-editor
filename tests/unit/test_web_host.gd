@@ -11,9 +11,15 @@ var _calls: Array = []
 var _race: Dictionary = {}
 var _fail_write := false
 var _recovery := ""
+## Answers of stat and write that wait for _release(): [method, json, answer].
+var _defer := false
+var _pending: Array = []
 
 
 func _fake(method: String, json: String, answer: Callable) -> Variant:
+	if _defer and (method == "stat" or method == "write"):
+		_pending.append([method, json, answer])
+		return null
 	_calls.append(method)
 	match method:
 		"hasFsAccess":
@@ -307,3 +313,41 @@ func test_every_editor_glyph_has_a_font_without_system_fonts() -> void:
 			missing.append("U+%04X" % code)
 	eq(missing, [], "glyphs without a font")
 	ok(symbols.has_char(0x25B6) and symbols.has_char(0x25BE) and symbols.has_char(0x223F) and symbols.has_char(0x275A), "the symbols that Inter lacks")
+
+
+## Answer the waiting request `index` of _pending (the browser answers in
+## any order).
+func _release(index: int) -> void:
+	var p: Array = _pending[index]
+	_pending.remove_at(index)
+	_defer = false
+	_fake(p[0], p[1], p[2])
+	_defer = true
+
+
+func test_a_poll_during_a_save_does_not_take_its_answer() -> void:
+	# Every answer emits disk_checked. A poll of the watch timer that ends
+	# while a save waits must not wake the save without its own answer.
+	var m := await _web_editor()
+	m.execute("open-project")
+	m.state.open_document(MENU)
+	await frames()
+	await _duplicate_quit(m)
+	_defer = true
+	m.execute("save")
+	await frames(1)
+	m.web.poll()
+	await frames(1)
+	eq(_pending.size(), 2, "the stat of the save and the stat of the poll wait")
+	_release(1)
+	await frames(1)
+	_release(0)
+	for i in 20:
+		await frames(1)
+		if not _pending.is_empty():
+			_release(0)
+	_defer = false
+	await frames()
+	ok(not m.state.workspace.is_dirty(MENU), "saved")
+	ok(_disk_text(MENU).contains("quit-button-copy"), "the disk has the edit")
+	ok(m._asking == null and not m._confirm.visible, "no question")

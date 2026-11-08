@@ -109,6 +109,23 @@ func _run() -> void:
 	_m.state.select_node(nodes[0], "canvas")
 	await _wait(3)
 	await _measure("idle with selection", func(_i): pass)
+	# The library search: one key per frame, a letter then a backspace.
+	var search := EdUi.line_edit(_m.shell, "palette-search")
+	search.grab_focus()
+	await _wait(2)
+	await _measure("typing in the library search", func(i): _key(KEY_B if i % 2 == 0 else KEY_BACKSPACE))
+	print("library search after typing: '%s', caret %d" % [search.text, search.caret_column])
+	search.release_focus()
+	await _wait(2)
+	# The hierarchy: a scroll offset of one row per frame, then
+	# scroll_to_item far and back (request R29).
+	var local0: int = _local_layouts()
+	await _measure("hierarchy: scroll offset", func(i): _m.shell.set_scroll_offset("hierarchy-tree", Vector2(0, 22.0 * float(i % 20))))
+	var far := maxi(0, _m.state.session.tree().nodes.size() - 1)
+	await _measure("hierarchy: scroll_to_item far and back", func(i): _m.shell.scroll_to_item("hierarchy-tree", far if i % 2 == 0 else 0))
+	print("row layouts of the window during the scrolls: %d" % (_local_layouts() - local0))
+	_m.shell.set_scroll_offset("hierarchy-tree", Vector2.ZERO)
+	await _wait(2)
 	# Typing: one character per frame into the source view, then the commit.
 	_m.source.grab_focus()
 	_m.source.set_caret_line(1)
@@ -373,6 +390,20 @@ func _button(p: Vector2, pressed: bool) -> void:
 
 
 ## One key press and release of a space (whitespace keeps the elements).
+## Row layouts of the window (godot-uxml R29), or 0 before that pin.
+func _local_layouts() -> int:
+	return int(_m.shell.get("local_layout_count")) if "local_layout_count" in _m.shell else 0
+
+
+func _key(code: Key) -> void:
+	for pressed in [true, false]:
+		var e := InputEventKey.new()
+		e.keycode = code
+		e.unicode = (OS.get_keycode_string(code).to_lower().unicode_at(0) if code != KEY_BACKSPACE and pressed else 0)
+		e.pressed = pressed
+		_m.get_viewport().push_input(e)
+
+
 func _type(_i: int) -> void:
 	for pressed in [true, false]:
 		var e := InputEventKey.new()
