@@ -13,7 +13,8 @@ pass (see "Frame cost" below). Before milestone 4 the pin moved to
 godot-uxml `6137987` (requests R1-R14), and the editor replaced every
 workaround with the godot-uxml editor APIs (see "Re-pin" below). Before
 milestone 7 the pin moved to `dc2c081` (R15, R16, R11), before milestone 8
-to `1167eb1` (R17-R26), and after milestone 8 to `f4ffe6e` (R17, R27-R29).
+to `1167eb1` (R17-R26), and after milestone 8 to `f4ffe6e` (R17, R27-R29)
+and `5a51b92` (R30-R32).
 
 The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
@@ -405,6 +406,60 @@ machine during the runs.
 - **Field values** through `set_field_value` cost about 0.15 ms each against
   0.02 ms for a direct `LineEdit` write: selection on the menu fixture went from
   9.8 to 10.4-10.7 ms native.
+
+## Re-pin to godot-uxml 5a51b92 (done)
+
+The pin moved from `f4ffe6e` to `5a51b92` (R30, R31, R32, a cross-pass
+native layout cache, restyles that return at once when nothing changed, and
+Yoga's single flex child, `lay-shrink-wrap`).
+
+- **R31.** The winner row of the declaration list is bold again
+  (`.status-winner`). A font change of the row lays out only the row. Forcing
+  a state lays out no inspector.
+- **R30.** No code change: the inspector already skipped a placeholder write
+  of the same text.
+- **R32.** No code change. The library does not get the subtree layout: the
+  hidden pooled rows make the library view more than a third of the window
+  document (R33). The cancel button of the search field lays out the window
+  at the first character and at the last backspace (R34).
+- **Rules of the pin.** Code that moves or resizes the control of an element
+  directly calls `refresh()`; a runtime state change goes through
+  `_queue_restyle()`. The editor moves or resizes no element control.
+  `EdMain._mount()` no longer sets `clip_contents` on the host (`.host` has
+  `overflow: hidden`), and `EdDemo` writes the preview field and the command
+  palette search through `set_field_value`.
+
+`bench/frame_cost.gd`, A/B runs on the same machine: the old pin (a worktree
+of `d1f6056`) and the new pin, in turns. Median of the run medians in ms per
+frame, old pin -> new pin with the bold row. Native: 3 runs (menu) and 2 runs
+(large); GDScript: 2 runs. Other agents loaded the machine during the runs;
+one run of a scenario can differ by 2 ms or more.
+
+| Scenario | menu, native | menu, GDScript | large, native | large, GDScript |
+| --- | --- | --- | --- | --- |
+| selection | 15.3 -> 16.2 | 20.4 -> 21.1 | 18.0 -> 17.3 | 23.6 -> 22.3 |
+| typing in the library search | 15.8 -> 13.3 | 81.5 -> 81.5 | 17.4 -> 13.0 | 97.1 -> 97.1 |
+| states: force a node | 14.0 -> 17.3 (5 runs: 13.5 -> 14.2) | 16.6 -> 17.4 | 21.6 -> 17.7 (4 runs: 22.0 -> 17.8) | 105 -> 102 |
+| states: play an edge | 12.6 -> 13.6 | 14.8 -> 15.5 | 28.3 -> 18.0 | 181 -> 162 |
+| hierarchy: scroll offset | 0.12 -> 0.12 | 0.11 -> 0.12 | 3.62 -> 3.22 | 8.70 -> 8.84 |
+| hierarchy: scroll_to_item far and back | 0.12 -> 0.12 | 0.12 -> 0.12 | 17.9 -> 17.9 | 50.2 -> 51.5 |
+| drag (move gesture) | 13.4 -> 13.8 | 15.2 -> 15.4 | 31.5 -> 30.7 | 33.0 -> 31.5 |
+
+- **Selection** did not change: about 15-16 ms native on the menu fixture on
+  both pins. The 11.8 ms of the run before `f4ffe6e` is not the cost on this
+  machine now. The placeholders are not the cost (R30). The layout of a
+  selection went from about 4.5-5.8 ms to 2.7-3.8 ms; the control applies
+  (about 6-9 ms) are the larger part.
+- **Typing in the library search**: 15.8 -> 13.3 ms native on the menu
+  fixture, 17.4 -> 13.0 ms on the large document, from the layout cache.
+  Still 120 window layouts in 60 frames (R33, R34).
+- **Forcing a state** on the large document: 21.6 -> 17.7 ms native. The
+  bold row costs about 0.7 ms native on the menu fixture and 0.9 ms on the
+  large document (the 5-run and 4-run medians, new pin without and with the
+  bold row), and nothing on the GDScript path. The single 3-run figure of the
+  menu fixture (17.3) has two slow runs.
+- **The hierarchy scroll** did not change: the rows lay out alone since
+  `f4ffe6e` (R29).
 
 ## Re-pin to godot-uxml f4ffe6e and the site fixes (done)
 

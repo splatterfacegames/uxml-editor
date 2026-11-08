@@ -21,6 +21,30 @@ All notable changes to this project are documented here. The format follows
   (attributes and inline styles), one undo history, revision-checked
   saves, reload of clean files changed on disk.
 
+### Changed (pin `5a51b92`)
+
+- godot-uxml moved to `5a51b92` (requests R30, R31 and R32 done; a cross-pass
+  native layout cache; quiet restyles; the single flex child of Yoga). The
+  round trip has 213 fixtures (2 new parity cases).
+- The winner row of the declaration list is bold again. A font change of the
+  row lays out only the row (R31). Forcing a state lays out no inspector. The
+  bold row adds about 0.7 ms native on the menu fixture and about 0.9 ms on
+  the large document, and no time on the GDScript path.
+- Typing in the library search: 15.8 -> 13.3 ms native on the menu fixture
+  and 17.4 -> 13.0 ms on the large document. Forcing a state on the large
+  document: 21.6 -> 17.7 ms native. Selection and the hierarchy scroll did
+  not change. The A/B figures are in `docs/roadmap.md`.
+- `EdMain._mount()` does not set `clip_contents` on the host control.
+  `.host` has `overflow: hidden`, so godot-uxml clips.
+- The demo script writes the preview field and the command palette search
+  through `set_field_value`, not through `LineEdit.text`.
+- `test_forcing_states_lays_out_no_inspector` also checks that the winner
+  row is bold.
+- New godot-uxml requests R33 (the hidden pooled rows of a collection view
+  make the library more than a third of the window, so a new source lays out
+  the window) and R34 (the cancel button of a search field lays out the
+  window). R30-R32 are done (`docs/godot-uxml-requests.md`).
+
 ### Changed (pin `f4ffe6e`)
 
 - godot-uxml moved to `f4ffe6e` (requests R17, R27, R28 and R29 done; selector

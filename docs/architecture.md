@@ -697,8 +697,13 @@ that keep a frame cheap:
   and only after a frame without another selection. A scroll lays out only the
   rows of the hierarchy (godot-uxml R29), but the rebind of the rows costs
   about 16 ms native on a 500-element document.
-- The rows of the declaration list change only paint-only properties with
-  their status (no `-unity-font-style`, request R31).
+- The winner row of the declaration list is bold. The row has a fixed size,
+  so the font change lays out only the row (godot-uxml R31).
+- Code that moves or resizes the control of a godot-uxml element directly
+  must call `refresh()`, and a runtime state change must go through the
+  godot-uxml API (`_queue_restyle()`). The editor does neither directly: the
+  panes are children of host controls, and field values go through
+  `set_field_value`.
 - The command palette loads at its first open; while closed it costs nothing.
 - The state-machine graph builds on a frame without a change, and only while
   the panel is open.

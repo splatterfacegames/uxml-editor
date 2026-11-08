@@ -88,7 +88,7 @@ static func stage(m: EdMain, demo: String) -> void:
 			var field := m.canvas.host.doc.get_native("profile-name") as LineEdit
 			if field != null:
 				field.grab_focus()
-				field.text = "Runner 2"
+				m.canvas.host.doc.set_field_value("profile-name", "Runner 2", true)
 				field.caret_column = field.text.length()
 		"diagnostics":
 			await _frames(tree, 4)
@@ -237,9 +237,10 @@ static func stage(m: EdMain, demo: String) -> void:
 			m.execute("palette")
 			await _frames(tree, 3)
 			m.command_palette.set_query("dup")
+			m.command_palette.doc.set_field_value("cp-search", "dup")
 			var le := EdUi.line_edit(m.command_palette.doc, "cp-search")
-			le.text = "dup"
-			le.caret_column = 3
+			if le != null:
+				le.caret_column = 3
 		"shortcuts":
 			m.execute("shortcuts")
 			await _frames(tree, 3)

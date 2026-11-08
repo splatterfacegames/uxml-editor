@@ -200,10 +200,11 @@
     margin-left: 0;
 }
 
-/* No -unity-font-style here: a font change of a row is not paint-only and
-   lays out the whole inspector (about 25 ms GDScript for each forced state). */
+/* Bold: the row has a fixed size, so godot-uxml lays out only the row
+   for the font change (R31). */
 .status-winner {
     color: rgb(150, 235, 150);
+    -unity-font-style: bold;
 }
 
 .status-overridden {

@@ -1,8 +1,8 @@
 # godot-uxml pin. Written by tools/update_godot_uxml.py. Do not edit.
-commit=f4ffe6e16008a2ea2dd9d3399bff5474257aa87b
-committed=2026-11-08T11:27:38+09:00
+commit=5a51b92451332ed6c61e0001e1fb8ab7190b2925
+committed=2026-11-08T15:11:55+09:00
 source=https://github.com/splatterfacegames/godot-uxml.git
-synced=2026-11-08T02:32:31+00:00
+synced=2026-11-08T06:16:18+00:00
 addon_files=205
-addon_sha256=e682364cf342d3f664278efe52342ba28ff2e6d70f8f4265b451d216e568c79d
-parity_cases=194
+addon_sha256=185c28485e89c26a705692a773b404d92dd8ef1795b99fa02fd277f3f7c09c6b
+parity_cases=196

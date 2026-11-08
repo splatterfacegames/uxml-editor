@@ -511,8 +511,9 @@ func test_a_small_window_keeps_room_for_the_source_view() -> void:
 
 
 func test_forcing_states_lays_out_no_inspector() -> void:
-	# A row of the declaration list changes its status class. A font change
-	# of a row is not paint-only and would lay out the whole inspector.
+	# A row of the declaration list changes its status class, and the winner
+	# row is bold. The row has a fixed size, so godot-uxml lays out only the
+	# row for the font change (R31), not the whole inspector.
 	var m := await editor()
 	m.state.select_node(node_named(m, "play-button"), "canvas")
 	m.states.set_open(true)
@@ -521,10 +522,18 @@ func test_forcing_states_lays_out_no_inspector() -> void:
 	await frames(3)
 	var d := m.inspector.doc
 	var lay: int = d.layout_count
+	var bold := 0
 	for id in ["active", "focus", "checked", "disabled", "normal", "hover"]:
 		m.states.select_node(id)
 		await frames(2)
+		for i in EdInspectorView.PROV_ROWS:
+			var el := d.get_element_model("prov-%d" % i)
+			if el != null and str(el.get_attribute("class")).split(" ").has("status-winner"):
+				var fs = d.get_computed_style("prov-%d" % i).get("-unity-font-style", {})
+				eq(str(fs.get("value", "") if fs is Dictionary else fs), "bold", "the winner row is bold")
+				bold += 1
 	eq(d.layout_count, lay, "no layout of the inspector for six forced states")
+	ok(bold > 0, "a winner row in the declaration list (%d)" % bold)
 	m.states.clear()
 	m.states.set_open(false)
 	await frames()

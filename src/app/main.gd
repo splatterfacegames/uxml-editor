@@ -372,7 +372,7 @@ func _mount(c: Control, host_name: String) -> void:
 		push_error("editor shell has no element named " + host_name)
 		add_child(c)
 		return
-	host.clip_contents = true
+	# `.host` in editor_shell.uss has `overflow: hidden`: godot-uxml clips.
 	host.add_child(c)
 	c.set_anchors_preset(Control.PRESET_FULL_RECT)
 	c.offset_left = 0

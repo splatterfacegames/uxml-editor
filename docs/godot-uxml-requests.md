@@ -41,12 +41,14 @@ Priority: **P1** blocks or slows milestone 1 work (a workaround exists),
 | R27 | P2 | done in `f4ffe6e` | A TextField that is not `is-delayed` loses its caret at each change |
 | R28 | P3 | done in `f4ffe6e` | A placeholder update without a restyle |
 | R29 | P2 | done in `f4ffe6e` for FixedHeight rows; other cases open | A scroll of a collection view lays out the whole document |
-| R30 | P3 | open | `set_field_placeholder` costs more than a write to the `LineEdit` |
-| R31 | P3 | open (the editor avoids it) | A font change of an element whose size does not follow its text lays out the document |
-| R32 | P2 | open | A new source of a TreeView lays out the whole document |
+| R30 | P3 | done in `5a51b92` | `set_field_placeholder` costs more than a write to the `LineEdit` |
+| R31 | P3 | done in `5a51b92`; used (the winner row is bold again) | A font change of an element whose size does not follow its text lays out the document |
+| R32 | P2 | done in `5a51b92`; the library does not get it (R33) | A new source of a TreeView lays out the whole document |
+| R33 | P2 | open | The hidden pooled rows of a collection view count as elements of its subtree |
+| R34 | P3 | open | The cancel button of a search field lays out the document |
 
-The editor pins godot-uxml `f4ffe6e` (github.com/splatterfacegames/godot-uxml),
-which has R1-R14, R16-R22, R24-R29, the text and `display` parts of R15, and
+The editor pins godot-uxml `5a51b92` (github.com/splatterfacegames/godot-uxml),
+which has R1-R14, R16-R22, R24-R32, the text and `display` parts of R15, and
 `clear_completed_transitions` for R23. The sections of the done requests give
 the final API and where the editor uses it.
 
@@ -60,8 +62,22 @@ Open upstream (no editor workaround):
   change of the row element itself (its own padding or `display`) still lay
   out the whole document. The hierarchy, the library, the project list and
   the diagnostics have FixedHeight rows.
-- R30-R32: new requests from this pin (the cost of `set_field_placeholder`,
-  a font change that lays out the document, a new source of a TreeView).
+- R33: the library search still lays out the whole window document for each
+  key. The library view has 415 of the 1,152 elements of the window: its pool
+  has 56 rows, and only about 15 rows show. So the R32 subtree layout does not
+  apply.
+- R34: the first character and the last backspace in a search field lay out
+  the whole window document (the cancel button changes `background-image`).
+
+Rules of `5a51b92` (godot-uxml `docs/design.md`): code that moves or resizes
+the control of an element directly calls `refresh()`, and a runtime state
+change goes through `_queue_restyle()` (the public API does). The editor
+moves or resizes no element control. The panes that the editor mounts are
+children of the host controls, not element controls. The editor set
+`clip_contents` on the hosts, which `.host` already sets with
+`overflow: hidden`; that write is removed. The demo script wrote two
+`LineEdit.text` values directly; the writes now go through
+`set_field_value`.
 
 ## R1. Load from text with a caller resolver (P1, done)
 
@@ -565,6 +581,22 @@ write (about 0.02 ms per field) when the minimum size of the field does not
 change, for example a write of the control and the attribute without the
 behavior's whole `bind_write`.
 
+**Done in `5a51b92`.** `set_field_placeholder` with the text that the field
+already has writes nothing. A new placeholder of a field that elides is
+written once, elided.
+
+**Editor use.** No code change: `EdInspectorView._value()` already skipped a
+write of the same text. On the menu fixture a selection changes about 6
+placeholders, not 70. A scratch measure (60 selections, native): the
+synchronous part of `select_node` is 1.4 ms on both pins, also with direct
+`LineEdit` writes. So the placeholders are not the cost of a selection frame
+(about 15-16 ms on the menu fixture on both pins). The profile of the
+restyles of a selection (`UxmlDocument.profile`): the layout went from about
+4.5-5.8 ms to 2.7-3.8 ms; the control applies (about 6-9 ms) are the larger
+part now. The 11.8 ms of the earlier run did not come back: an A/B run of the
+old pin on the same machine gives 15.3 ms (`docs/roadmap.md`, "Re-pin to
+godot-uxml 5a51b92").
+
 ## R31. A font change of an element whose size does not follow its text lays out the document (P3)
 
 The rows of the declaration list (`.link.prov`, `height: 18px`, stretched in
@@ -582,6 +614,18 @@ element whose two axes are fixed (the rule of `_text_stable` and
 `_fixed_axis`) runs no layout, or lays out only its subtree, as a text change
 does (R15).
 
+**Done in `5a51b92`.** A change of a text-measure property
+(`-unity-font-style`, `-unity-font`, `font-size`, the spacings) on an element
+whose two axes are fixed lays out the subtree of the element.
+
+**Editor use.** `.status-winner` in `inspector.uss` has
+`-unity-font-style: bold` again. Forcing a state lays out no inspector
+(`test_forcing_states_lays_out_no_inspector` also checks that the winner row
+is bold). The cost of the bold row, `bench/frame_cost.gd` "states: force a
+node", median of the runs: native +0.7 ms on the menu fixture (13.5 -> 14.2,
+5 runs) and +0.9 ms on the large document (16.9 -> 17.8, 4 runs); GDScript no
+change (17.8 -> 17.4 menu, 110 -> 102 large).
+
 ## R32. A new source of a TreeView lays out the whole document (P2)
 
 Each key in the library search filters the library: `set_tree_source` with
@@ -594,4 +638,49 @@ fixed height, and the tree view has a fixed size in its pane.
 Request: a new source and an expand of a collection view with FixedHeight
 rows in a view of a fixed size lay out only the rows, as R29 does for a
 scroll.
+
+**Done in `5a51b92`.** A change inside a collection view (a new source, an
+expand) whose border box cannot follow its content lays out the subtree of
+the view.
+
+**Editor use.** No code change. The library does not get the subtree layout
+(R33): the window document still lays out twice per key (120 layouts in 60
+frames). A key costs 13.3 ms native (15.8 ms before) and about 81 ms
+GDScript (no change) on the menu fixture.
+
+## R33. The hidden pooled rows of a collection view count as elements of its subtree (P2)
+
+godot-uxml builds the rows of a collection view at load, for the tallest
+viewport (`UxmlContainerParts.pool_height`, at least 1080 px): 56 rows of
+20 px. The rows that do not show are `display: none`. The window document of
+the editor has 1,152 elements; the library TreeView has 415 of them, but only
+about 15 rows show (a 278 px view). `_add_local()` lays out the document when
+the roots cover a third of the document, and counts the hidden rows. So a new
+source of the library (each key in the library search) lays out the whole
+window document. The layout leaves the document unsettled, so the next
+restyle lays out the document again.
+
+A scratch measure without the third-of-the-document check (the library then
+gets a subtree layout): native 13.5 -> 23.4 ms per key, GDScript 83.6 -> 73.8
+ms. So on the native path a subtree layout of the 56 rows costs more than a
+layout of the whole document with the cross-pass cache.
+
+Request: the subtree layout of a collection view and the third-of-the-document
+check count only the rows that show (or skip the `display: none` rows), so a
+new source of a view in a fixed pane costs about one layout of its visible
+rows. The files list, the hierarchy and the diagnostics have the same pool.
+
+## R34. The cancel button of a search field lays out the document (P3)
+
+The first character in a `ToolbarSearchField` and the backspace that empties
+it change `background-image` of the cancel button
+(`unity-search-field-base__cancel-button`, a `Button`). `background-image` is
+paint-only only on a `UxmlBox` (Style application), so the change lays out
+the whole window document (`bench/frame_cost.gd`, "typing in the library
+search": 60 of the 120 window layouts; one layout per key in a scratch run
+without the R33 check).
+
+Request: a `background-image` change of a control whose size does not follow
+the image (a fixed size, or a button with a fixed size in the theme) runs no
+layout, or lays out only the subtree of the control.
 
