@@ -10,6 +10,8 @@
 //   check of lastModified and size just before the write.
 // - Fallback without the API: a zip from a file input. Saves go to the copy;
 //   the editor downloads the project as a zip.
+// - A sample project: `?sample=<name>` opens samples/<name>.zip from the
+//   site at the start, as a zip (the project site bundles one).
 //
 // Every call answers through a Godot callback with one JSON string. File
 // bytes travel as base64.
@@ -136,6 +138,32 @@
 
     pickZip() {
       zipInput().click();
+    },
+
+    // The name in `?sample=<name>`, or "" (letters, digits, "-" and "_").
+    sampleRequest() {
+      const name = new URLSearchParams(window.location.search).get("sample") || "";
+      return /^[A-Za-z0-9_-]{1,64}$/.test(name) ? name : "";
+    },
+
+    // Fetch samples/<name>.zip next to the page; answers as the zip input.
+    async fetchSample(name, cb) {
+      try {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) {
+          throw new Error("not a sample name: " + name);
+        }
+        const response = await fetch("samples/" + name + ".zip", { cache: "no-cache" });
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        const buf = await response.arrayBuffer();
+        if (buf.byteLength > MAX_BYTES) {
+          throw new Error("The sample is larger than 64 MB.");
+        }
+        answer(cb, { ok: true, mode: "zip", name: name + ".zip", data: b64(buf) });
+      } catch (e) {
+        answer(cb, { ok: false, error: String(e) });
+      }
     },
 
     async pickDirectory(cb) {

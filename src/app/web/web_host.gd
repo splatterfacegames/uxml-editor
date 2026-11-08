@@ -20,6 +20,9 @@ extends Node
 ## - **Zip** (mode "zip", without the API or with `?host=zip`): the user picks
 ##   a zip. Saves go to the copy (the same revision check), and each save
 ##   downloads the project as a zip.
+## - **Sample** (`?sample=<name>`): at the start the host fetches
+##   `samples/<name>.zip` next to the page and opens it as a zip. The project
+##   site bundles one, so a visitor needs no file of their own.
 ##
 ## Without the web feature (tests, the desktop) `bridge` is a Callable fake:
 ## see `use_bridge()`.
@@ -73,6 +76,9 @@ func _ready() -> void:
 	if main != null:
 		main.state.external_conflicts.connect(func(paths): log_line("asked reload or keep " + ", ".join(PackedStringArray(paths))))
 		main.canvas.host.rendered.connect(func(): log_line("rendered " + main.canvas.host.entry_path))
+	var sample := String(_js.sampleRequest())
+	if not sample.is_empty():
+		open_sample(sample)
 
 
 ## A line of the browser console that tools/web_smoke.cjs waits for.
@@ -116,6 +122,21 @@ func pick_zip() -> void:
 	_call("pickZip", "", Callable())
 
 
+## Fetch the sample project `sample_name` (samples/<name>.zip next to the
+## page) and open it as a zip.
+func open_sample(sample_name: String) -> void:
+	log_line("opening sample " + sample_name)
+	_call("fetchSample", sample_name, _on_sample)
+
+
+func _on_sample(json: String) -> void:
+	var r = JSON.parse_string(json)
+	if not r is Dictionary or not r.get("ok", false):
+		_status("The sample project did not open: %s" % (str(r.get("error", "unknown error")) if r is Dictionary else "no answer"), true)
+		return
+	_on_zip(json)
+
+
 func _cb(f: Callable) -> JavaScriptObject:
 	var cb := JavaScriptBridge.create_callback(func(args: Array): f.call(String(args[0]) if not args.is_empty() else "{}"))
 	_callbacks.append(cb)
@@ -133,6 +154,8 @@ func _call(method: String, json: String, answer: Callable) -> void:
 			_js.pickDirectory(_cb(answer))
 		"pickZip":
 			_js.pickZip()
+		"fetchSample":
+			_js.fetchSample(json, _cb(answer))
 		"stat":
 			_js.stat(json, _cb(answer))
 		"write":

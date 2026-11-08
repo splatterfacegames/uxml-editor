@@ -14,3 +14,7 @@ __pycache__/
 # Local agent workspaces
 .worktrees/
 .superpowers/
+
+# Site build (site/build.sh)
+/site/dist/
+/site/.r2-upload/

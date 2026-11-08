@@ -24,6 +24,10 @@ extends Control
 ##                        resize, multi, preview)
 
 const SHELL := "res://src/app/ui/editor_shell.uxml"
+## Symbols that the editor draws and Inter lacks (U+25B6, U+25BE, U+223F,
+## U+275A). A desktop finds them in a system font; a browser has no system
+## fonts. A subset of DejaVu Sans (THIRD-PARTY-NOTICES.md) is the fallback.
+const SYMBOL_FONT := "res://src/app/fonts/DejaVuSans-Symbols.ttf"
 const PRESETS := [
 	["1920 × 1080", Vector2i(1920, 1080)], ["1600 × 900", Vector2i(1600, 900)],
 	["1280 × 720", Vector2i(1280, 720)], ["1024 × 768", Vector2i(1024, 768)],
@@ -108,11 +112,24 @@ var _tree_selected: Array = []
 var _tree_rows: Dictionary = {}
 
 
+## Add the symbol font as a fallback of godot-uxml's default font (one
+## shared resource), before any document draws text.
+static func add_symbol_fallback() -> void:
+	var base := UxmlTheme.default_font()
+	var symbols := load(SYMBOL_FONT) as Font
+	if base == null or symbols == null or base.fallbacks.has(symbols):
+		return
+	var list := base.fallbacks.duplicate()
+	list.append(symbols)
+	base.fallbacks = list
+
+
 func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--gdscript") or OS.has_feature("web") or OS.has_feature("gdscript_core"):
 		use_gdscript_path()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	set_process(false)
+	add_symbol_fallback()
 	get_window().title = "UXML Editor"
 	get_window().min_size = Vector2i(1000, 600)
 	shell = UxmlDocument.new()

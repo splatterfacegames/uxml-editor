@@ -1,0 +1,123 @@
+name: Release
+
+# On a version tag (v0.8.0, ...): export the Windows, Linux and macOS
+# builds of the editor and attach them to a GitHub release of that tag.
+# The project site lists the files of the latest release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.7.1
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Windows exports on Windows: the preset writes the exe resources.
+          - name: Windows
+            os: windows-latest
+            preset: Windows Desktop
+            out: build/windows/uxml-editor.exe
+            asset: uxml-editor-windows-x86_64.zip
+          - name: Linux
+            os: ubuntu-latest
+            preset: Linux
+            out: build/linux/uxml-editor.x86_64
+            asset: uxml-editor-linux-x86_64.zip
+          - name: macOS
+            os: ubuntu-latest
+            preset: macOS
+            out: build/macos/uxml-editor.zip
+            asset: uxml-editor-macos-universal.zip
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Check the godot-uxml copy against the pin
+        run: python tools/update_godot_uxml.py --verify
+      - name: Install Godot and the export templates
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q templates.tpz -d templates-unpacked
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+            unzip -q godot.zip
+            echo "GODOT=$PWD/Godot_v${GODOT_VERSION}-stable_win64_console.exe" >> "$GITHUB_ENV"
+            dest="$APPDATA/Godot/export_templates/${GODOT_VERSION}.stable"
+          else
+            curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+            unzip -q godot.zip
+            chmod +x "Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+            echo "GODOT=$PWD/Godot_v${GODOT_VERSION}-stable_linux.x86_64" >> "$GITHUB_ENV"
+            dest="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          fi
+          mkdir -p "$(dirname "$dest")"
+          mv templates-unpacked/templates "$dest"
+      - name: Export
+        run: |
+          mkdir -p "$(dirname "${{ matrix.out }}")"
+          "$GODOT" --headless --path . --import || "$GODOT" --headless --path . --import
+          "$GODOT" --headless --path . --export-release "${{ matrix.preset }}" "${{ matrix.out }}"
+          ls -la "$(dirname "${{ matrix.out }}")"
+      - name: Package
+        run: |
+          mkdir -p dist
+          dir="$(dirname "${{ matrix.out }}")"
+          cp LICENSE THIRD-PARTY-NOTICES.md "$dir/"
+          case "${{ matrix.name }}" in
+            macOS)
+              # The export is a zip of the app bundle; add the notices.
+              cp "${{ matrix.out }}" "dist/${{ matrix.asset }}"
+              (cd "$dir" && zip -q "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}" LICENSE THIRD-PARTY-NOTICES.md) ;;
+            Windows)
+              (cd "$dir" && 7z a -tzip "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}" . > /dev/null) ;;
+            *)
+              (cd "$dir" && zip -q -r "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}" .) ;;
+          esac
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          ls -la dist
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --title "UXML Editor $TAG" --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi

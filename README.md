@@ -288,6 +288,13 @@ has **Open a project zip** and **Download the project as a zip**.
 The browser keeps a copy of the open project in its storage for the site.
 The recovery journal also stays there.
 
+`?sample=<name>` opens `samples/<name>.zip` next to the page at the start,
+without a file picker. The project site
+(https://uxml-editor.splatterfacegames.com, built by `site/build.sh`)
+bundles `sample.zip`: the menu, options and nested-styles fixtures in one
+project. A browser has no system fonts: a subset of DejaVu Sans
+(`src/app/fonts`) gives the symbols that Inter lacks.
+
 The smoke test opens the export in headless Chrome or Edge and checks both
 ways:
 

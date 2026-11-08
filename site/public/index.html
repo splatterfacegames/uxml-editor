@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="UXML Editor is a visual editor for Unity UI Toolkit documents (UXML) and stylesheets (USS). Every edit is a patch on the exact file text. Runs in the browser." />
+    <meta name="theme-color" content="#1c1c1c" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="UXML Editor: a visual editor for UXML and USS" />
+    <meta property="og:description" content="Edit Unity UI Toolkit documents visually. Every edit is a patch on the exact text of the file. Try it in the browser." />
+    <meta property="og:url" content="https://uxml-editor.splatterfacegames.com" />
+    <meta property="og:image" content="https://uxml-editor.splatterfacegames.com/img/m3-resize-snap.webp" />
+    <link rel="canonical" href="https://uxml-editor.splatterfacegames.com" />
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>UXML Editor: a visual editor for UXML and USS</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="UXML Editor home">
+        <img src="/mark.svg" width="28" height="28" alt="" />
+        <span>UXML Editor</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="#try">Try it</a>
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a class="nav-source" href="https://github.com/splatterfacegames/uxml-editor">Source</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <h1>Edit Unity UI files visually. Keep every byte you did not change.</h1>
+          <p class="lede">
+            UXML Editor is a visual editor for Unity UI Toolkit documents
+            (UXML) and stylesheets (USS), built on Godot 4.7. Each edit is a
+            patch on the exact text of the file: comments, attribute order,
+            quotes, whitespace and line endings stay as they were.
+          </p>
+        </div>
+
+        <div class="app-shell" id="try">
+          <div class="app-bar">
+            <div class="app-actions">
+              <button class="button button-primary" type="button" data-open="/editor/?sample=sample">Open the sample project</button>
+              <button class="button button-quiet" type="button" data-open="/editor/">Open your own project</button>
+            </div>
+            <a class="app-tab" href="/editor/?sample=sample" target="_blank" rel="noopener">Open in a new tab</a>
+          </div>
+          <div class="app-stage" data-app-stage>
+            <img class="app-poster" src="/img/m3-resize-snap.webp" width="1600" height="900" alt="The editor with a menu document: project, hierarchy and library on the left, the canvas with a resize and a snap guide in the centre, the source view and diagnostics below, the inspector on the right." />
+          </div>
+          <div class="app-notes">
+            <p>
+              The editor runs in your browser: a Godot web export, about
+              40&nbsp;MB, downloaded when you click. The sample is a project
+              with a menu, an options form and nested stylesheets. Edits stay in
+              your browser; Ctrl+S downloads the project as a zip.
+            </p>
+            <p>
+              <b>Your own project:</b> Ctrl+O. Chrome and Edge open a folder with
+              the File System Access API and save to it. Other browsers open a
+              zip of the project. The editor needs a window at least 1000 pixels
+              wide.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="truth section" aria-labelledby="truth-title">
+        <h2 id="truth-title">Source text is the truth.</h2>
+        <div class="truth-body">
+          <p class="large">
+            The editor changes a file only with a patch on its exact text. A
+            patch replaces one range of characters; all other bytes stay the
+            same.
+          </p>
+          <p>
+            An edit that cannot be made as an exact patch stops with a message.
+            It changes no file and adds no undo step. A drag on the canvas, a
+            value in the inspector and a keystroke in the source view are all
+            patches into the same history, so one undo works across every view
+            and every tab.
+          </p>
+          <figure class="patch" aria-label="Example: an inspector edit changes only one value in Menu.uss">
+            <div class="patch-file"><span>Assets/UI/Menu.uss</span><span>CRLF</span></div>
+            <pre><code><span class="ln">1</span><span class="cm">/* Task 17A menu stylesheet: preserve spacing and CRLF. */</span>
+<span class="ln">2</span>.menu-root {
+<span class="ln">3</span>  padding-left: 24px;
+<span class="ln">4</span>  padding-top: 16px;
+<span class="ln">5</span>}
+<span class="ln">6</span>
+<span class="ln">7</span>.menu-button.primary {
+<span class="ln">8</span>  background-color: <del>#18794e</del><ins>#2563eb</ins>;
+<span class="ln">9</span>  color: #ffffff;
+<span class="ln">10</span>}</code></pre>
+            <figcaption>An inspector edit of <code>background-color</code> replaces seven characters. The comment, the spacing and the CRLF line endings stay.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="features section" id="features" aria-labelledby="features-title">
+        <div class="section-head">
+          <h2 id="features-title">What it does</h2>
+          <p>Screenshots from the editor, with the menu fixture of the repository.</p>
+        </div>
+
+        <div class="feature-list">
+          <figure class="feature">
+            <img src="/img/m4-provenance.webp" width="1600" height="900" loading="lazy" alt="The declarations of background-color in the inspector: the winning rule and the theme value, with the declaration selected in the source view." />
+            <figcaption>
+              <h3>Where each value comes from</h3>
+              <p>Put the focus in a style field: the inspector lists every declaration of the property, winner first, with its status, file and line. Click one to select it in the source.</p>
+            </figcaption>
+          </figure>
+          <figure class="feature">
+            <img src="/img/m2-drag-library-to-canvas.webp" width="1600" height="900" loading="lazy" alt="A Toggle dragged from the library over the canvas, with the drop hint." />
+            <figcaption>
+              <h3>Library, hierarchy and canvas</h3>
+              <p>Every runtime and editor element of the godot-uxml catalog. Drag an element to the canvas or the hierarchy; move and resize on the canvas with snapping to siblings, the parent and a grid.</p>
+            </figcaption>
+          </figure>
+          <figure class="feature">
+            <img src="/img/m4-state-preview.webp" width="1600" height="900" loading="lazy" alt="The hover state forced on a button: the hover rule wins in the canvas and in the inspector." />
+            <figcaption>
+              <h3>Pseudo-states without the mouse</h3>
+              <p>Force <code>:hover</code>, <code>:active</code>, <code>:focus</code>, <code>:checked</code>, <code>:selected</code> or <code>:disabled</code> on the selection. The canvas, the declarations and the write targets follow.</p>
+            </figcaption>
+          </figure>
+          <figure class="feature">
+            <img src="/img/m6-timeline.webp" width="1600" height="900" loading="lazy" alt="A hover toggle paused at 0.6 seconds: three transition tracks with delay, duration and easing, and the easing curve in the inspector." />
+            <figcaption>
+              <h3>Transition timeline</h3>
+              <p>One track for each transitioning property, with delay, duration and easing. Play, scrub and loop on the canvas; drag a bar to change <code>transition-delay</code> or <code>transition-duration</code>.</p>
+            </figcaption>
+          </figure>
+          <figure class="feature">
+            <img src="/img/m7-state-node.webp" width="1600" height="900" loading="lazy" alt="The state-machine panel with hover forced on a button and its rules in the inspector." />
+            <figcaption>
+              <h3>State machine</h3>
+              <p>The states of the selected element and the changes between them. A solid arrow has a transition, a dashed arrow is instant. Click a state to force it, an arrow to play it.</p>
+            </figcaption>
+          </figure>
+          <figure class="feature">
+            <img src="/img/m5-diagnostics-jump.webp" width="1600" height="900" loading="lazy" alt="A diagnostic selected in the list: its range in the source view and its element in the canvas, hierarchy and inspector." />
+            <figcaption>
+              <h3>Diagnostics with a location</h3>
+              <p>Import diagnostics from godot-uxml, parse problems, unknown elements and refused edits. Select one to select its text range and its element.</p>
+            </figcaption>
+          </figure>
+          <figure class="feature">
+            <img src="/img/m8-command-palette.webp" width="1600" height="900" loading="lazy" alt="The command palette filtered by dup." />
+            <figcaption>
+              <h3>Command palette</h3>
+              <p>Ctrl+Shift+P lists every command; type a few letters in order to find one. Ctrl+/ shows the current key bindings, which the settings file can change.</p>
+            </figcaption>
+          </figure>
+        </div>
+        <ul class="more">
+          <li><b>Saves check the disk.</b> Before a write, the editor compares the file with the version it read, and asks when another program changed it.</li>
+          <li><b>Recovery.</b> Each unsaved edit goes to a journal at once; after a crash the next open asks to recover or discard.</li>
+          <li><b>Tabs and one history.</b> An undo of an edit in another document shows that document's tab.</li>
+          <li><b>Typed style fields.</b> Lengths, colours, keywords, assets, angles, times and easings are checked before the edit.</li>
+        </ul>
+      </section>
+
+      <section class="engine section" aria-labelledby="engine-title">
+        <div class="engine-copy">
+          <h2 id="engine-title">Rendered by godot-uxml</h2>
+          <p>
+            The canvas is <a href="https://godot-uxml.splatterfacegames.com">godot-uxml</a>,
+            the Godot addon that loads UXML and USS and makes native Godot
+            controls. It matches Unity 6000.3 in 176 of 177 test cases. So the
+            canvas shows what the file looks like in a Godot game, and the
+            editor's own panels are UXML too.
+          </p>
+          <p>
+            The editor uses godot-uxml's editor APIs: loads through a resolver
+            of unsaved buffers, partial stylesheet reloads, provenance of each
+            declaration, forced states, a transition timeline and hit tests.
+            Choose the runtime theme or Unity's editor skin, dark or light, for
+            the canvas.
+          </p>
+        </div>
+        <dl class="specs">
+          <div><dt>Engine</dt><dd>Godot 4.7.1</dd></div>
+          <div><dt>Windows</dt><dd>godot-uxml native core (Rust)</dd></div>
+          <div><dt>Linux, macOS, browser</dt><dd>godot-uxml GDScript path, same results</dd></div>
+          <div><dt>Tests</dt><dd>Headless suite on both paths in CI</dd></div>
+        </dl>
+      </section>
+
+      <section class="download section" id="download" aria-labelledby="download-title">
+        <div class="section-head">
+          <h2 id="download-title">Download</h2>
+          <p>
+            Builds for Windows, Linux and macOS are attached to each GitHub
+            release. The editor has no installer: unpack and start it.
+          </p>
+        </div>
+        <div class="release" data-release>
+          <p class="release-status" data-release-status>No release yet. The release workflow builds the three platforms when a version tag is pushed. Until then, export a build from the source:</p>
+          <ul class="release-files" data-release-files hidden></ul>
+        </div>
+        <div class="platforms">
+          <article>
+            <h3>Windows x64</h3>
+            <p>Native core of godot-uxml. Keep <code>uxml-editor.exe</code> and <code>godot_uxml_native.windows.x86_64.dll</code> in the same folder.</p>
+            <pre><code>godot --headless --path . --export-release "Windows Desktop" build/windows/uxml-editor.exe</code></pre>
+          </article>
+          <article>
+            <h3>Linux x86_64</h3>
+            <p>GDScript path. Make the file executable and start it.</p>
+            <pre><code>godot --headless --path . --export-release "Linux" build/linux/uxml-editor.x86_64</code></pre>
+          </article>
+          <article>
+            <h3>macOS</h3>
+            <p>Universal, GDScript path, not signed: open it the first time with Control+click and <b>Open</b>.</p>
+            <pre><code>godot --headless --path . --export-release "macOS" build/macos/uxml-editor.zip</code></pre>
+          </article>
+        </div>
+        <p class="note">Exports need Godot 4.7.1 (standard build) and its export templates. To run from the source: <code>godot --path . -- --project=fixtures/projects/menu</code>.</p>
+      </section>
+
+      <section class="docs section" aria-labelledby="docs-title">
+        <h2 id="docs-title">Documentation</h2>
+        <ul class="doc-links">
+          <li><a href="https://github.com/splatterfacegames/uxml-editor/blob/main/README.md">README</a><span>Features, options, keyboard shortcuts, tests.</span></li>
+          <li><a href="https://github.com/splatterfacegames/uxml-editor/blob/main/docs/architecture.md">Architecture</a><span>Layers, rendering, the history, the window, the web export.</span></li>
+          <li><a href="https://github.com/splatterfacegames/uxml-editor/blob/main/docs/roadmap.md">Roadmap</a><span>Milestones 1 to 8 and what is not done.</span></li>
+          <li><a href="https://github.com/splatterfacegames/uxml-editor/tree/main/docs/adr">Decision records</a><span>Write targets, recovery, tabs and history, the Godot host.</span></li>
+        </ul>
+        <p class="licence">
+          Apache License 2.0. Copyright Jetha Chan. See
+          <a href="https://github.com/splatterfacegames/uxml-editor/blob/main/LICENSE">LICENSE</a> and
+          <a href="https://github.com/splatterfacegames/uxml-editor/blob/main/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a>.
+          Unity and UI Toolkit are trademarks of Unity Technologies; this
+          project is not affiliated with Unity.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="#top"><img src="/mark.svg" width="22" height="22" alt="" /><span>UXML Editor</span></a>
+      <p>The canvas is drawn by <a href="https://godot-uxml.splatterfacegames.com">godot-uxml</a>, UXML and USS for Godot 4.</p>
+      <div>
+        <a href="https://github.com/splatterfacegames/uxml-editor">GitHub</a>
+        <a href="https://github.com/splatterfacegames/uxml-editor/releases">Releases</a>
+        <a href="https://github.com/splatterfacegames/uxml-editor/blob/main/LICENSE">Apache 2.0</a>
+      </div>
+    </footer>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

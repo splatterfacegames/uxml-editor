@@ -23,6 +23,11 @@ func _fake(method: String, json: String, answer: Callable) -> Variant:
 			for p in _disk:
 				files.append({"path": p, "data": Marshalls.raw_to_base64(_disk[p]["data"]), "mtime": _disk[p]["mtime"], "size": _disk[p]["size"]})
 			answer.call(JSON.stringify({"ok": true, "mode": "fs", "name": "menu", "files": files}))
+		"fetchSample":
+			if json != "sample":
+				answer.call(JSON.stringify({"ok": false, "error": "HTTP 404"}))
+				return null
+			answer.call(JSON.stringify({"ok": true, "mode": "zip", "name": "sample.zip", "data": Marshalls.raw_to_base64(_sample_zip())}))
 		"stat":
 			var req = JSON.parse_string(json)
 			var out: Array = []
@@ -234,6 +239,43 @@ func test_a_zip_opens_and_a_save_downloads_the_zip() -> void:
 	DirAccess.remove_absolute(out)
 
 
+## A zip of the menu fixture under one top folder, as the site bundles it.
+func _sample_zip() -> PackedByteArray:
+	var tmp := ProjectSettings.globalize_path("user://test-web-sample-%d.zip" % Time.get_ticks_usec())
+	var z := ZIPPacker.new()
+	z.open(tmp)
+	for rel in [MENU, MENU_USS]:
+		z.start_file("sample/" + rel)
+		z.write_file(_disk[rel]["data"])
+		z.close_file()
+	z.close()
+	var bytes := FileAccess.get_file_as_bytes(tmp)
+	DirAccess.remove_absolute(tmp)
+	return bytes
+
+
+func test_a_sample_from_the_site_opens_as_a_zip() -> void:
+	var m := await _web_editor()
+	m.web.open_sample("sample")
+	await frames()
+	ok(_calls.has("fetchSample"), "the host fetches the sample")
+	eq(m.web.mode, "zip")
+	eq(m.web.project_name, "sample", "the top folder")
+	eq(m.state.files, [MENU_USS, MENU])
+	ok(m.state.session != null, "the first document is open")
+	await _duplicate_quit(m)
+	m.execute("save")
+	await frames()
+	eq(m.web.downloads, 1, "a save downloads the project as a zip")
+
+
+func test_a_missing_sample_opens_nothing() -> void:
+	var m := await _web_editor()
+	m.web.open_sample("nope")
+	await frames()
+	ok(not m.state.has_project(), "no project")
+
+
 func test_a_broken_zip_opens_nothing() -> void:
 	var m := await _web_editor()
 	_fs = false
@@ -247,3 +289,21 @@ func test_names_are_safe_folder_names() -> void:
 	eq(EdWebHost._safe(""), "project")
 	eq(EdWebHost._common_folder(PackedStringArray(["a/x.uxml", "a/b/y.uss"])), "a/")
 	eq(EdWebHost._common_folder(PackedStringArray(["a/x.uxml", "y.uss"])), "")
+
+
+## A browser has no system fonts: every symbol that the editor draws is in
+## Inter or in the symbol fallback (src/app/fonts).
+func test_every_editor_glyph_has_a_font_without_system_fonts() -> void:
+	await _web_editor()
+	var inter := UxmlTheme.default_font()
+	var symbols := load(EdMain.SYMBOL_FONT) as Font
+	ok(inter.fallbacks.has(symbols), "the symbol font is a fallback of the default font")
+	EdMain.add_symbol_fallback()
+	eq(inter.fallbacks.count(symbols), 1, "added once")
+	var missing := []
+	for ch in "·×—…←→−∿▲▶▾◀○●⚠✓❚":
+		var code := ch.unicode_at(0)
+		if not symbols.has_char(code) and not (load(UxmlTheme.DEFAULT_FONT) as FontFile).get_supported_chars().contains(ch):
+			missing.append("U+%04X" % code)
+	eq(missing, [], "glyphs without a font")
+	ok(symbols.has_char(0x25B6) and symbols.has_char(0x25BE) and symbols.has_char(0x223F) and symbols.has_char(0x275A), "the symbols that Inter lacks")

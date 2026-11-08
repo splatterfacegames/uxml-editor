@@ -436,9 +436,14 @@ Done:
 
 Screenshots: `docs/screenshots/m8-*.png`.
 
+Later: the browser has no system fonts, so a few symbols of the window (▶, ∿,
+▾, ❚) showed as boxes. A subset of DejaVu Sans (`src/app/fonts`) is now the
+fallback of the default font. The project site
+(https://uxml-editor.splatterfacegames.com) runs the web export with a sample
+project (`?sample=sample`).
+
 Not done: a signed and notarized macOS build; an installer; a run of the Linux
 and macOS builds (CI runs the suite on Linux from the source, not the export);
 a rebinding editor in the shortcut map (the settings file changes a binding);
-the browser has no system fonts, so a few symbols of the window (▶, ∿, ▾) show
-as boxes; File System Access needs Chrome or Edge, and other browsers use the
+File System Access needs Chrome or Edge, and other browsers use the
 zip; a project over 64 MB does not open in the browser.

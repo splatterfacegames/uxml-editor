@@ -20,6 +20,21 @@ redistributed in this repository or in its builds.
 `tests/fixtures/godot-uxml-parity/` holds the UXML and USS parity cases of
 the same godot-uxml commit (Apache-2.0), used as round-trip fixtures.
 
+## DejaVu Sans (Bitstream Vera license; DejaVu changes public domain)
+
+`src/app/fonts/DejaVuSans-Symbols.ttf` is a subset of DejaVu Sans 2.37
+(https://dejavu-fonts.github.io): the blocks General Punctuation, Arrows,
+Mathematical Operators, Miscellaneous Technical, Box Drawing to Geometric
+Shapes, Miscellaneous Symbols, Dingbats and Miscellaneous Symbols and
+Arrows, made with fontTools `pyftsubset`. The editor uses it as the
+fallback of the default font for the symbols that Inter lacks (for example
+the play button and the menu arrows); a browser has no system fonts. The
+subset keeps the name DejaVu Sans, which contains neither "Bitstream" nor
+"Vera". The full license text is in `src/app/fonts/DejaVuSans.LICENSE`:
+Fonts are (c) Bitstream (Bitstream Vera Fonts license); DejaVu changes are
+in the public domain; glyphs imported from Arev fonts are (c) Tavmjong Bah
+(Arev Fonts license).
+
 ## Godot Engine (MIT)
 
 Exported builds of the editor contain the Godot Engine runtime,
