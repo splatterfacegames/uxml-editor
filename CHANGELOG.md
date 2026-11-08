@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-08
+
 ### Changed (Godot rebuild, branch `godot`)
 
 - The editor is a Godot 4.7 application. godot-uxml renders the edited
