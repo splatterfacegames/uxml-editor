@@ -175,6 +175,13 @@ var _local_unsettled: Dictionary = {}
 # point the full re-apply/re-layout reaches — before paint-only restyles
 # are allowed to skip the layout.
 var _reapply: Array = []
+## Control -> [the style Dictionary and the disabled/gone flags of its last
+## apply]: a settling re-apply of an unchanged control updates its theme only.
+var _applied_as: Dictionary = {}
+## Control -> [the style and disabled flag of its last apply that styled it
+## (not gone)].
+var _styled_as: Dictionary = {}
+static var settle_bump := true
 ## Measures of the controls after the last layout that left the document
 ## unsettled ([minimum sizes, natural sizes], in the order of _snap_cs, see
 ## _settle_snapshot), or [] when the next settling layout must run.
@@ -220,6 +227,9 @@ var _native_bound: UssCascade = null  # cascade whose native layout has the cont
 ## the scene tree until they are shown (see _park_hidden). False keeps
 ## every control in the tree from the load on.
 static var park_hidden := true
+## A switch for experiments: bench/prof/ab.gd and bench/prof/ab_equiv.gd
+## load with it off and on (no code reads it on main).
+static var ab_flag := true
 var _transitions: UssTransitions = null  # running USS transitions (per load)
 
 ## Round the layout to the pixel grid as Unity does (Yoga's
@@ -227,6 +237,59 @@ var _transitions: UssTransitions = null  # running USS transitions (per load)
 ## land on whole pixels. Both layout paths round the same way. Read at
 ## every layout.
 var pixel_grid := true
+
+## Unity's PanelSettings: how the panel scales with the size of this
+## Control (its "screen", in pixels) — constant pixel size with a scale,
+## constant physical size (the screen DPI) or scale with screen size (a
+## reference resolution). The layout runs in panel points (this Control's
+## size times the resolved scale) and rounds on the pixel grid of the
+## screen; the controls draw at the scale (text, borders, radii, slices
+## and images at device resolution). null (the default): no panel
+## scaling, one point per pixel, the panel the size of this Control. See
+## docs/design.md, "Panel scaling".
+@export var panel_settings: UxmlPanelSettings = null:
+	set(v):
+		if v == panel_settings:
+			return
+		if panel_settings != null and panel_settings.changed.is_connected(_on_panel_settings_changed):
+			panel_settings.changed.disconnect(_on_panel_settings_changed)
+		panel_settings = v
+		if v != null:
+			v.changed.connect(_on_panel_settings_changed)
+		_on_panel_settings_changed()
+
+## A Unity PanelSettings asset (`.asset`): read into panel_settings when set
+## (UxmlPanelSettings.load_unity_asset; its theme style sheet, when found,
+## becomes the panel's theme). A file that is not a PanelSettings asset
+## leaves panel_settings as it was, with a diagnostic.
+@export_file("*.asset") var panel_settings_asset: String = "":
+	set(v):
+		panel_settings_asset = v
+		if v.is_empty():
+			return
+		var ps := UxmlPanelSettings.load_unity_asset(v, project_root)
+		if ps == null:
+			diagnostics.append(UxmlDiagnostic.make("missing-file",
+				'"%s" is not a Unity PanelSettings asset; panel_settings unchanged' % v, "", 0, v))
+			return
+		for w in ps.import_warnings:
+			diagnostics.append(UxmlDiagnostic.make("unsupported-value", w, "", 0, v))
+		panel_settings = ps
+
+## The screen DPI for UxmlPanelSettings.CONSTANT_PHYSICAL_SIZE. 0 (the
+## default): DisplayServer.screen_get_dpi() of this Control's screen, over
+## the scale of the canvas (Godot's stretch), so that a point keeps its
+## physical size.
+@export var screen_dpi: float = 0.0:
+	set(v):
+		screen_dpi = v
+		_on_panel_settings_changed()
+
+var _ppp := 1.0                 # pixels per point of the panel (UxmlPanelScale)
+var _grid_ppp := 1.0            # the pixel grid: _ppp times the device scale
+var _panel_size := Vector2.ZERO # the panel in points (with panel_settings)
+var _scaled := false            # panel_settings in effect
+var _unsnap_vp: Viewport = null # the viewport whose control snapping this document holds off
 
 ## When true, transitions advance only through advance_transitions() —
 ## deterministic time for tests and tools. When false (default) they follow
@@ -316,8 +379,17 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_RESIZED and _doc != null:
-		_do_layout()
+	if what == NOTIFICATION_RESIZED:
+		# A scaled panel resolves its scale for the new size; a new pixel
+		# grid applies every control again (see _on_panel_settings_changed).
+		var regrid := panel_settings != null and _update_scale()
+		if _doc != null:
+			if regrid:
+				_full_apply = true
+				_force_layout = true
+				_restyle_now()
+			else:
+				_do_layout()
 	elif what == NOTIFICATION_ENTER_TREE or what == NOTIFICATION_EXIT_TREE:
 		_binding.set_active(what == NOTIFICATION_ENTER_TREE)
 		var vp := get_viewport()
@@ -327,6 +399,17 @@ func _notification(what: int) -> void:
 				vp.gui_focus_changed.connect(cb)
 			elif what == NOTIFICATION_EXIT_TREE and vp.gui_focus_changed.is_connected(cb):
 				vp.gui_focus_changed.disconnect(cb)
+			# Godot's stretch (the viewport's size and scale) changes the
+			# device pixel grid of a scaled panel.
+			var sc := Callable(self, "_on_panel_settings_changed")
+			if what == NOTIFICATION_ENTER_TREE and not vp.size_changed.is_connected(sc):
+				vp.size_changed.connect(sc)
+			elif what == NOTIFICATION_EXIT_TREE and vp.size_changed.is_connected(sc):
+				vp.size_changed.disconnect(sc)
+		if what == NOTIFICATION_ENTER_TREE and panel_settings != null:
+			_on_panel_settings_changed()
+		if what == NOTIFICATION_EXIT_TREE:
+			_hold_unsnap(false)
 	elif what == NOTIFICATION_PREDELETE:
 		_binding.clear()
 		_free_parked()
@@ -379,7 +462,11 @@ func _finish_load(adopt: bool) -> void:
 	_loader_warnings = _doc.warnings.size()
 	if adopt and shared_sheets != null:
 		_adopt_sheets(shared_sheets)
-	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
+	var theme_sheet := theme_path
+	if panel_settings != null and not panel_settings.theme_style_sheet.is_empty():
+		theme_sheet = panel_settings.theme_style_sheet
+	UxmlTheme.attach(_doc, theme_sheet, editor_theme, editor_skin)
+	_update_scale()
 	_index()
 	_restyle_now()
 	_attrs.restore_view_data()
@@ -1015,6 +1102,9 @@ func _clear() -> void:
 	_local_unsettled = {}
 	_reapply = []
 	_settle_ms = []
+	_applied_as = {}
+	_styled_as = {}
+	_memo_layout = -1
 	_settle_skip = false
 	_snap_of = null
 	_snap_cs = []
@@ -1046,6 +1136,7 @@ func _clear() -> void:
 ## Parent map, name index (first wins, duplicates diagnosed), runtime
 ## control tree, and signal wiring — everything keyed off the element tree.
 func _index() -> void:
+	var pt := Time.get_ticks_usec() if profile != null else 0
 	var collections := _prepare_collections()
 	# Control part trees (Toggle label/input/checkmark, Foldout content, ...)
 	# become real model elements before anything indexes the tree.
@@ -1058,6 +1149,8 @@ func _index() -> void:
 					for sub in row.walk():
 						if sub.part_of == null:
 							_pooled[sub] = true
+	if profile != null:
+		pt = _profile_add("load: part trees", pt)
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -1080,6 +1173,8 @@ func _index() -> void:
 			continue
 		_by_name[ns] = el
 		_el_names[el] = ns
+	if profile != null:
+		pt = _profile_add("load: index", pt)
 
 	var factory := UxmlControlFactory.new(_resolver, _doc.path, _doc.source, _rt_warnings)
 	factory.element_paths = _doc.element_paths
@@ -1093,11 +1188,17 @@ func _index() -> void:
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
+	if profile != null:
+		pt = _profile_add("load: control creation", pt)
 	# The controls were built off the tree; hidden subtrees stay off it.
 	_park_hidden()
+	if profile != null:
+		pt = _profile_add("load: first cascade", pt)
 	for c in built:
 		if not c.has_meta(&"uxml_parked"):
 			_root_box.add_child(c)
+	if profile != null:
+		pt = _profile_add("load: add_child", pt)
 	_first_pass = true
 	# Observable model: set_attribute() on any element restyles just it.
 	var on_changed := _on_model_changed
@@ -1107,9 +1208,17 @@ func _index() -> void:
 		if el == _doc.root:
 			continue
 		_wire(el, _controls[el])
+	if profile != null:
+		pt = _profile_add("load: signal wiring", pt)
 	_behaviors = UxmlBehaviors.attach_all(self)
+	if profile != null:
+		pt = _profile_add("load: behaviors", pt)
 	_attrs.setup()
+	if profile != null:
+		pt = _profile_add("load: attributes", pt)
 	_binding.setup()
+	if profile != null:
+		pt = _profile_add("load: bindings", pt)
 
 
 # ---------------------------------------------------------------------------
@@ -1300,7 +1409,8 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
 		_applier.element_paths = _doc.element_paths
-		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT
+		_applier.unity_line_metrics = UxmlTheme.uses_default(_doc)
+		_applier.set_pixels_per_point(_grid_ppp)
 	var need_layout := _force_layout or _full_apply or _unsettled
 	# Non-empty while the layout would run only to settle the last pass.
 	var settle_layout_only: Array = _settle_ms if _unsettled and not (_force_layout or _full_apply) else []
@@ -1313,9 +1423,27 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	# Layout roots that this pass can lay out alone (_local_root): root ->
 	# true, or "fresh" when a measure of its subtree changed.
 	var local := {}
-	_fixed_memo.clear()
-	_def_memo.clear()
+	# _fixed_root and _definite read the layout styles of the roots and their
+	# ancestors, the display flags and whether the last layout laid a root
+	# out: their memos stay across restyles that change none of those (a
+	# scroll changes a translate and paint-only row styles).
+	var po := PackedByteArray()
+	var memo_ok := not _full_apply and not _force_layout and flipped.is_empty() and _inject.is_empty() and _memo_layout == layout_count
+	if not _full_apply:
+		var els0: Array = _cascade.els
+		po.resize(changed.size())
+		for k in changed.size():
+			var el0: UxmlElement = els0[changed[k]]
+			if _paint_only(olds[k], _styles[el0], _controls.get(el0) is UxmlBox):
+				po[k] = 1
+			else:
+				memo_ok = false
+	if not memo_ok:
+		_fixed_memo.clear()
+		_def_memo.clear()
+		_memo_layout = layout_count
 	_local_covered = 0
+	_shown_memo.clear()
 	if not _sub_req.is_empty() or not _local_unsettled.is_empty():
 		if not (need_layout and settle_layout_only.is_empty()):
 			# The requested rows alone can cover a third of the document.
@@ -1323,7 +1451,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			for r in _sub_req:
 				var ri = _cascade.index.get(r)
 				if ri != null:
-					req += _cascade._end[ri] - ri
+					req += _shown_in(ri)
 			if req * 3 > _cascade.els.size():
 				need_layout = true
 				settle_layout_only = []
@@ -1342,6 +1470,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					break
 		_sub_req = {}
 		_local_unsettled = {}
+	var settle_set := {}  # the settling re-applies of this pass
 	var load_pass := _first_pass
 	_first_pass = false
 	if _full_apply:
@@ -1355,13 +1484,13 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			if _reload_pass and _transition_only(olds[k], _styles[el]):
 				continue
 			seen[el] = true
-			if not _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox):
+			if po[k] == 0:
 				measure_fresh = true
 				if need_layout and settle_layout_only.is_empty():
 					continue
 				# R31: a text style change of an element whose border box does
 				# not follow its content lays out its subtree alone.
-				if _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox, TEXT_MEASURE) \
+				if _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox, OWN_MEASURE) \
 						and _add_local(local, el, el, true):
 					continue
 				if not _add_local(local, el, null, true) and not _add_local_view(local, el, true):
@@ -1393,6 +1522,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			if not seen.has(el) and _controls.has(el):
 				seen[el] = true
 				applied.append(el)
+				settle_set[el] = true
 		for c in _applier.drifting:
 			var del = _el_of.get(c)
 			if del != null:
@@ -1406,14 +1536,53 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	_reload_pass = false
 	var cindex: Dictionary = _cascade.index
 	var pt := Time.get_ticks_usec() if profile != null else 0
+	var bumped := {}
+	var flip_set := {}  # elements whose effective flags flipped (a shown page)
+	for fel in flipped:
+		flip_set[fel] = true
 	for el in applied:
 		var c: Control = _controls[el]
 		var st: Dictionary = _styles.get(el, {})
 		var ci: int = cindex[el]
+		var flags := _dis[ci] * 2 + _gone[ci]
+		if settle_bump and not settle_set.is_empty() and settle_set.has(el):
+			var last = _applied_as.get(c)
+			if last != null and is_same(last[0], st) and last[1] == flags and not c is UxmlField and not _applier.drifting.has(c):
+				# A settling re-apply of a control whose style and flags are
+				# those of its last apply: the apply would write what is there.
+				# What it changes is the theme update of a text control (a
+				# Label shapes its text again): only that runs.
+				if not c is UxmlBox:
+					var nat: Control = _natives.get(el, c)
+					nat.begin_bulk_theme_override()
+					nat.end_bulk_theme_override()
+				bumped[el] = true
+				continue
+		if not flip_set.is_empty() and flags == _dis[ci] * 2 and flip_set.has(el) and not settle_set.has(el) and _shown_again(c, st, _dis[ci]):
+			# Shown again (a page behind a tab) with the style and disabled
+			# state of its last styled apply: only the flags change back.
+			# No theme update here: the settling restyle that follows gives the
+			# text controls theirs, and its snapshot check lays out again when
+			# a measure changed.
+			_applier.apply_flags(el, c, _natives.get(el, c), st, _dis[ci] == 1, false)
+			_applied_as[c] = [st, flags]
+			if c is UxmlToggle:
+				(c as UxmlToggle).disabled = _dis[ci] == 1
+			continue
 		_applier.apply(el, c, _natives.get(el, c), st,
 			_dis[ci] == 1, _gone[ci] == 1)
+		_applied_as[c] = [st, flags]
+		if _gone[ci] == 0:
+			_styled_as[c] = [st, _dis[ci]]
 		if c is UxmlToggle:
 			(c as UxmlToggle).disabled = _dis[ci] == 1 or _gone[ci] == 1
+	if not bumped.is_empty():
+		# Not re-applied: their boxes, fits and caches stay.
+		var kept: Array = []
+		for el in applied:
+			if not bumped.has(el):
+				kept.append(el)
+		applied = kept
 	if profile != null:
 		pt = _profile_add("apply", pt)
 	_full_apply = false
@@ -1435,6 +1604,13 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					text_placed.append(tel)
 	if need_layout and settle_layout_only.is_empty() and not _settle_ms.is_empty():
 		_settle_skip = true
+	var pre_placed := false
+	if need_layout and not settle_layout_only.is_empty() and not applied.is_empty():
+		# The re-applied controls got fresh styleboxes: place them at the
+		# rects of the last layout first (a fitted Button measures as fitted
+		# only after its fit), then compare their measures with the snapshot.
+		_place_elements(applied, cindex)
+		pre_placed = true
 	if need_layout and not settle_layout_only.is_empty() and _settled_without_layout(text_placed):
 		# The pass that left the document unsettled is confirmed: the
 		# controls measure as after its layout, so a layout would give the
@@ -1471,14 +1647,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		# Text leaves of a stable size are placed again too (their fit and
 		# elision follow the text).
 		var placed: Array = applied + text_placed if not text_placed.is_empty() else applied
-		if _native_layout():
-			var idx := PackedInt32Array()
-			for el in placed:
-				idx.append(cindex[el])
-			_cascade._native.call("place_only", _applier, idx)
-		else:
-			for el in placed:
-				_place_control(el)
+		_place_elements(text_placed if pre_placed else placed, cindex)
 		# No layout: only the re-applied controls can elide differently.
 		if _applier != null and not _applier.elide.is_empty() and not placed.is_empty():
 			var cs: Array = []
@@ -1507,6 +1676,32 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		set_process(_transitions.active() and not transitions_manual)
 		_transitions.flush_events(_emit_transition_event)
 	_clean_key = [_opt_rev, _cascade, _cascade.touched, _doc]
+
+
+## True when the last apply of `c` was a gone one (display: none here or
+## above) and the apply before it styled it with `st` and `dis`.
+func _shown_again(c: Control, st: Dictionary, dis: int) -> bool:
+	var was = _applied_as.get(c)
+	if was == null or int(was[1]) & 1 == 0:
+		return false
+	var styled = _styled_as.get(c)
+	return (styled != null and is_same(styled[0], st) and styled[1] == dis
+		and not c is UxmlField and not _applier.drifting.has(c))
+
+
+## Place `els` at the rects of the last layout (inset hooks and Button fits
+## included), without a layout.
+func _place_elements(els: Array, cindex: Dictionary) -> void:
+	if els.is_empty():
+		return
+	if _native_layout():
+		var idx := PackedInt32Array()
+		for el in els:
+			idx.append(cindex[el])
+		_cascade._native.call("place_only", _applier, idx)
+	else:
+		for el in els:
+			_place_control(el)
 
 
 ## True when nothing that a restyle reads changed since the last restyle:
@@ -1907,6 +2102,20 @@ const TEXT_MEASURE := {
 }
 
 
+## TEXT_MEASURE and the background image of a themed control (R34: the
+## cancel button of a search field): its stylebox can change the control's
+## minimum size, so on an element whose border box does not follow its
+## content it lays out the element's subtree alone, as a text change does.
+const OWN_MEASURE := {
+	"-unity-font-style": true, "-unity-font": true, "-unity-font-definition": true,
+	"font-size": true, "letter-spacing": true, "word-spacing": true,
+	"-unity-paragraph-spacing": true,
+	"background-image": true,
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+}
+
+
 ## Paint-only on a UxmlBox: the background image and its slicing. Unity
 ## does not measure a background image either (an Image measures
 ## --unity-image, which the applier reads into natural_size; the settle
@@ -1993,6 +2202,9 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 			var m: Array = sb.get_meta("uxml_margins")
 			ms.x = maxf(0.0, ms.x - m[0] - m[2])
 			ms.y = maxf(0.0, ms.y - m[1] - m[3])
+	if _grid_ppp != 1.0 and c.has_meta(&"uxml_line_fix"):
+		# Unity's line height on a scaled panel (UxmlStyleApplier.line_fix).
+		ms.y = UxmlStyleApplier.line_fix(c, ms.y)
 	return ms
 
 
@@ -2055,6 +2267,7 @@ func _volatile_width(el: UxmlElement) -> float:
 func _compute_layout(host: Vector2) -> Dictionary:
 	if _cascade != null and _cascade._native != null and use_native_layout:
 		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_pixels_per_point", _grid_ppp)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var r: Array = _cascade._native.call(
@@ -2076,7 +2289,8 @@ func _layout_options() -> Dictionary:
 		 # (the volatile set); every other measure is hint-independent.
 		 "hint_free": true,
 		 "text_controls": _text_controls(),
-		 "pixel_grid": pixel_grid}
+		 "pixel_grid": pixel_grid,
+		 "pixels_per_point": _grid_ppp}
 
 
 ## Elements with children whose control draws text (Label, RichTextLabel,
@@ -2118,6 +2332,7 @@ func _do_layout() -> void:
 	if _native_layout():
 		# Native layout + placement; results stay native.
 		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_pixels_per_point", _grid_ppp)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var force := PackedInt32Array()
@@ -2126,7 +2341,7 @@ func _do_layout() -> void:
 			force.append(cidx[el])
 		_cascade._native.call("set_natural_epoch", UxmlBox.natural_epoch)
 		var r: Array = _cascade._native.call(
-			"layout_place", size, 0.0, _layout_warned, _rt_warnings,
+			"layout_place", _layout_host(), 0.0, _layout_warned, _rt_warnings,
 			_applier, force, _placed_force.size() == _controls.size())
 		_unsettled = _pending_fresh or bool(r[0])
 		_pending_fresh = false
@@ -2143,7 +2358,7 @@ func _do_layout() -> void:
 			_settle_skip = false
 		return
 	var prev := _rects
-	var res := _compute_layout(size)
+	var res := _compute_layout(_layout_host())
 	_rects = res["rects"]
 	_insets = res["insets"]
 	_raw_rects = res["raw"]
@@ -2169,6 +2384,7 @@ func _do_layout() -> void:
 ## restyle (the rows of a view share their ancestors).
 var _fixed_memo: Dictionary = {}
 var _def_memo: Dictionary = {}
+var _memo_layout := -1  # layout_count when the memos above were cleared
 var _local_covered := 0  # elements under the roots of the restyle
 
 
@@ -2222,8 +2438,8 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 		var qi = _cascade.index.get(q)
 		if qi != null and qi > ri and qi < end:
 			inner.append(q)
-			inner_n += _cascade._end[qi] - qi
-	var covered: int = _local_covered - inner_n + end - ri
+			inner_n += _shown_in(qi)
+	var covered: int = _local_covered - inner_n + _shown_in(ri)
 	if covered * 3 > _cascade.els.size():
 		return false
 	var ok = _fixed_memo.get(r)
@@ -2242,6 +2458,29 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 	return true
 
 
+## The elements of the subtree at preorder index `i` that show (not
+## display: none here or above; R33: the hidden rows of a collection's pool
+## do not count toward the third of the document). Memo per restyle.
+func _shown_in(i: int) -> int:
+	var m = _shown_memo.get(i)
+	if m != null:
+		return m
+	var end: int = _cascade._end[i]
+	var n := 0
+	var k := i
+	while k < end:
+		if _gone.size() > k and _gone[k] == 1:
+			k = _cascade._end[k]  # a gone element hides its subtree
+			continue
+		n += 1
+		k += 1
+	_shown_memo[i] = n
+	return n
+
+
+var _shown_memo: Dictionary = {}
+
+
 ## R32: _add_local with the nearest collection view above `x` as the root,
 ## when that view has a fixed size: a new item source or an expand changes
 ## the content height and the rows, and lays out the view alone.
@@ -2249,7 +2488,10 @@ func _add_local_view(local: Dictionary, x: UxmlElement, fresh: bool) -> bool:
 	var v = _parents.get(x)
 	while v != null and not (UxmlContainerParts.is_collection(v.local) and v.part_of == null):
 		v = _parents.get(v)
-	return v != null and _add_local(local, x, v, fresh)
+	# A multi-column view sizes its header columns after the layout of the
+	# document (update_columns): it is not laid out alone (seen once R33 let
+	# a view with a large hidden pool take the subtree layout).
+	return v != null and not UxmlContainerParts.is_multi_column(v) and _add_local(local, x, v, fresh)
 
 
 ## A layout root that the last layout laid out, shown, whose border box
@@ -2310,6 +2552,7 @@ func _do_local_layout(local: Dictionary, applied: Array) -> void:
 	var placed: Array = []
 	if _native_layout():
 		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_pixels_per_point", _grid_ppp)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var idx := PackedInt32Array()
@@ -2415,6 +2658,12 @@ func _place_control(el: UxmlElement) -> void:
 		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
+	if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF and c.size.y > r.size.y + 0.01:
+		# A wrapping Label in a box shorter than its lines: Godot floors it at
+		# the minimum size it had at a width a measure gave it; the minimum
+		# at the placed width (the native placement does the same).
+		c.update_minimum_size()
+		c.size = r.size
 	if _applier != null and c is Label and c.size.x > r.size.x + 0.01:
 		# Narrower than its text (UxmlStyleApplier.fit_label_width; the
 		# native placement does the same).
@@ -2759,6 +3008,146 @@ func set_element_state_for(element: UxmlElement, state: String, on: bool) -> voi
 ## as in Unity. Without `include_parts`, a hit on a control part gives the
 ## control element that owns the part (the authored element). A pending
 ## restyle and layout run first.
+# ---------------------------------------------------------------------------
+# Panel scaling (panel_settings)
+# ---------------------------------------------------------------------------
+
+## The pixels per point of the panel (Unity's scaledPixelsPerPoint): 1
+## without panel_settings. A point of the layout is this many pixels of this
+## Control.
+func get_pixels_per_point() -> float:
+	return _ppp
+
+
+## The size of the panel in points: the size the layout lays the root out
+## at (this Control's size without panel_settings).
+func get_panel_size() -> Vector2:
+	return _layout_host()
+
+
+## A point of the panel (points, the coordinates of the root element, Unity's
+## panel space) in this Control's coordinates (pixels; element_at(),
+## get_element_rect() with no space).
+func panel_to_document(point: Vector2) -> Vector2:
+	return _root_box.position + point * _root_box.scale
+
+
+## A point of this Control (pixels) in panel points.
+func document_to_panel(point: Vector2) -> Vector2:
+	var s := _root_box.scale
+	return (point - _root_box.position) / Vector2(maxf(s.x, 1e-9), maxf(s.y, 1e-9))
+
+
+## The host size of the layout: the panel in points.
+func _layout_host() -> Vector2:
+	return _panel_size if _scaled else size
+
+
+## Device pixels per unit of this Control: Godot's stretch and the scales of
+## the canvas above it (1 in a plain window).
+func _device_scale() -> float:
+	if not is_inside_tree():
+		return 1.0
+	var t := get_viewport().get_final_transform() * get_global_transform_with_canvas()
+	var sc := t.get_scale()
+	var v := maxf(absf(sc.x), absf(sc.y))
+	return v if v > 0.0 else 1.0
+
+
+func _screen_dpi() -> float:
+	if not is_inside_tree() or DisplayServer.get_name() == "headless":
+		return 0.0
+	var w := get_window()
+	var screen := w.current_screen if w != null else DisplayServer.SCREEN_OF_MAIN_WINDOW
+	return float(DisplayServer.screen_get_dpi(screen))
+
+
+func _on_panel_settings_changed() -> void:
+	var old := _layout_host()
+	if not _update_scale() or _doc == null:
+		if _doc != null and _scaled and _layout_host() != old:
+			_do_layout()
+		return
+	# A new pixel grid: every box is built again (border widths, the
+	# antialiased edges) and the layout runs without the cross-pass cache
+	# (its box lengths were rounded on the old grid).
+	_full_apply = true
+	_force_layout = true
+	_queue_restyle()
+
+
+## Resolves the panel scale for this Control's size; places the root box
+## (scaled by the pixels per point) and gives the grid to the applier and
+## the layout. Returns true when the pixel grid changed.
+func _update_scale() -> bool:
+	var old_grid := _grid_ppp
+	var ps := panel_settings
+	if ps == null:
+		_ppp = 1.0
+		_grid_ppp = 1.0
+		_scaled = false
+		_root_box.scale = Vector2.ONE
+		_root_box.visible = true
+		_root_box.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_PARENT_NODE
+		_root_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_root_box.offset_left = 0.0
+		_root_box.offset_top = 0.0
+		_root_box.offset_right = 0.0
+		_root_box.offset_bottom = 0.0
+	else:
+		var dev := _device_scale()
+		var dpi := screen_dpi if screen_dpi > 0.0 else _screen_dpi()
+		var r := ps.resolve(size, dpi / dev if dpi > 0.0 else 0.0)
+		var ppp := float(r["pixels_per_point"])
+		_scaled = true
+		# Unity draws nothing at a scale of 0 or less.
+		_root_box.visible = ppp > 0.0
+		_ppp = ppp if ppp > 0.0 else 1.0
+		_grid_ppp = _ppp * dev
+		_panel_size = r["panel_size"] if ppp > 0.0 else size
+		_root_box.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_root_box.position = Vector2.ZERO
+		_root_box.size = _panel_size
+		_root_box.scale = Vector2(_ppp, _ppp)
+		# Text drawn at the scale: Godot rasterizes the glyphs at the font
+		# size times the canvas scale (CanvasItem.oversampling_with_scale).
+		_root_box.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
+	_hold_unsnap(_scaled and _grid_ppp != 1.0 and is_inside_tree())
+	if _grid_ppp == old_grid:
+		return false
+	_layout_xcache = {}
+	if _applier != null:
+		_applier.set_pixels_per_point(_grid_ppp)
+	return true
+
+
+## Godot snaps every Control's position to whole units of its parent
+## (Viewport.gui_snap_controls_to_pixels). Under a scaled panel those units
+## are points, not pixels: a control at 8.25 points (11 pixels at 1.33
+## pixels per point) would draw at 8 points. While a scaled document is in
+## a viewport, that viewport does not snap (the panel's own pixel grid does
+## the job); the setting comes back when the last one leaves.
+func _hold_unsnap(on: bool) -> void:
+	var vp: Viewport = get_viewport() if on else _unsnap_vp
+	if on == (_unsnap_vp != null) or vp == null:
+		return
+	var n := int(vp.get_meta(&"uxml_unsnap", 0))
+	if on:
+		if n == 0:
+			vp.set_meta(&"uxml_snap_was", vp.gui_snap_controls_to_pixels)
+			vp.gui_snap_controls_to_pixels = false
+		vp.set_meta(&"uxml_unsnap", n + 1)
+		_unsnap_vp = vp
+	else:
+		_unsnap_vp = null
+		if n <= 1:
+			vp.gui_snap_controls_to_pixels = bool(vp.get_meta(&"uxml_snap_was", true))
+			vp.remove_meta(&"uxml_unsnap")
+			vp.remove_meta(&"uxml_snap_was")
+		else:
+			vp.set_meta(&"uxml_unsnap", n - 1)
+
+
 func element_at(point: Vector2, respect_picking: bool = false, include_parts: bool = false) -> UxmlElement:
 	if _doc == null:
 		return null
@@ -2910,7 +3299,7 @@ func _border_widths(element: UxmlElement) -> PackedFloat64Array:
 			var l := UssValues.parse_length(String(e["value"]))
 			if l["kind"] == "px":
 				var v := float(l["value"])
-				out[k] = UxmlFlexLayout.grid_box(v, true) if pixel_grid else maxf(0.0, v)
+				out[k] = UxmlPanelScale.grid_box(v, true, _grid_ppp) if pixel_grid else maxf(0.0, v)
 		k += 1
 	return out
 
