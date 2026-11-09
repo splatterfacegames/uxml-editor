@@ -56,6 +56,15 @@ var _texts: Dictionary = {}
 var forced: Dictionary = {}
 ## The tree of the last map: the ids of `forced` name its nodes.
 var _mapped_tree: EdUxmlSource = null
+## The scale preview of the canvas (Unity's PanelSettings, godot-uxml
+## UxmlDocument.panel_settings), or null: one pixel per point. Editor state:
+## nothing of it goes into the UXML or USS text.
+var panel_settings: UxmlPanelSettings = null
+## The DPI of the previewed screen (ConstantPhysicalSize). The editor does
+## not use the DPI of its own monitor: the canvas shows another screen.
+var screen_dpi := 96.0
+## The theme style sheet of the last render (panel_settings).
+var _panel_theme := ""
 
 
 func _init() -> void:
@@ -78,6 +87,8 @@ func _make_doc() -> void:
 	doc.auto_load = false
 	doc.name = "Document"
 	doc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	doc.screen_dpi = screen_dpi
+	doc.panel_settings = panel_settings
 	add_child(doc)
 
 
@@ -100,6 +111,67 @@ func is_loaded() -> bool:
 ## The document fills the viewport through its anchors.
 func set_screen_size(s: Vector2i) -> void:
 	size = s
+
+
+## Preview the document under `ps` (null: one pixel per point) on a screen
+## of `dpi`. A copy goes to the document, so later changes of `ps` need a
+## new call. Returns true when a full render() is needed: the theme style
+## sheet of the settings changed.
+func set_panel_settings(ps: UxmlPanelSettings, dpi: float = 96.0) -> bool:
+	panel_settings = null if ps == null else ps.duplicate() as UxmlPanelSettings
+	screen_dpi = dpi if dpi > 0.0 else 96.0
+	if doc != null:
+		doc.screen_dpi = screen_dpi
+		doc.panel_settings = panel_settings
+	var theme := "" if panel_settings == null else panel_settings.theme_style_sheet
+	return theme != _panel_theme and is_loaded()
+
+
+# ---------------------------------------------------------------------------
+# Panel coordinates (godot-uxml docs/design.md, "Panel scaling")
+#
+# Document pixels: the coordinates of the SubViewport and of the document
+# Control (element_at(), get_element_rect() without a space, the canvas
+# overlay). Panel points: the coordinates of the layout and of the USS
+# values (left, width). A point is pixels_per_point() pixels.
+# ---------------------------------------------------------------------------
+
+## Pixels per point of the preview (1 without panel settings).
+func pixels_per_point() -> float:
+	return doc.get_pixels_per_point() if doc != null else 1.0
+
+
+## The panel (the root element) in points.
+func panel_size() -> Vector2:
+	return doc.get_panel_size() if doc != null else Vector2(size)
+
+
+## A point in document pixels -> panel points.
+func to_points(p: Vector2) -> Vector2:
+	return doc.document_to_panel(p) if doc != null else p
+
+
+## A point in panel points -> document pixels.
+func to_pixels(p: Vector2) -> Vector2:
+	return doc.panel_to_document(p) if doc != null else p
+
+
+## A rectangle in document pixels -> panel points.
+func rect_to_points(r: Rect2) -> Rect2:
+	var a := to_points(r.position)
+	return Rect2(a, to_points(r.end) - a)
+
+
+## A rectangle in panel points -> document pixels.
+func rect_to_pixels(r: Rect2) -> Rect2:
+	var a := to_pixels(r.position)
+	return Rect2(a, to_pixels(r.end) - a)
+
+
+## rect_of() in panel points (the units of the USS values).
+func points_rect_of(id: int, box: String = "border") -> Rect2:
+	var r := rect_of(id, box)
+	return r if r == Rect2() else rect_to_points(r)
 
 
 func _apply_theme() -> void:
@@ -140,6 +212,7 @@ func render(ws: EdWorkspace, entry: String, root_abs: String) -> void:
 		_resolver.set_override(root_abs + "/" + p, text)
 		_paths_by_key[EdBufferResolver.key(root_abs + "/" + p)] = p
 		_texts[p] = text
+	_panel_theme = "" if panel_settings == null else panel_settings.theme_style_sheet
 	doc.load_source(ws.text(entry), root_abs + "/" + entry, "", _resolver)
 	_after_load(ws, entry, false)
 	renders += 1
@@ -160,6 +233,8 @@ func render(ws: EdWorkspace, entry: String, root_abs: String) -> void:
 ## entry, another theme, a buffer added or removed).
 func update(ws: EdWorkspace, entry: String) -> bool:
 	if not is_loaded() or entry != entry_path or _resolver == null or _theme_loaded != theme_mode:
+		return false
+	if _panel_theme != ("" if panel_settings == null else panel_settings.theme_style_sheet):
 		return false
 	if ws.buffers.size() != _texts.size():
 		return false
@@ -420,8 +495,8 @@ func workspace_path(file: String) -> String:
 	return _paths_by_key.get(EdBufferResolver.key(file), "")
 
 
-## The border widths (left, top) of `id` in px: the padding box in the
-## element's own space (R14).
+## The border widths (left, top) of `id` in points (USS px): the padding
+## box in the element's own space (R14).
 func border_start(id: int) -> Vector2:
 	var el = element_for_node.get(id)
 	if el == null:
@@ -429,8 +504,9 @@ func border_start(id: int) -> Vector2:
 	return doc.get_element_rect(el, el, "padding").position
 
 
-## The rectangles of the rendered authored siblings of `id`.
-func sibling_rects(id: int) -> Array:
+## The rectangles of the rendered authored siblings of `id`, in document
+## pixels (points: true, in panel points).
+func sibling_rects(id: int, points: bool = false) -> Array:
 	var pid := parent_id(id)
 	var out: Array = []
 	for other in element_for_node:
@@ -438,7 +514,7 @@ func sibling_rects(id: int) -> Array:
 			continue
 		var r := rect_of(other)
 		if r.has_area():
-			out.append(r)
+			out.append(rect_to_points(r) if points else r)
 	return out
 
 

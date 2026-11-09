@@ -9,6 +9,13 @@ extends Control
 ##   --select=<name>      select the element with this `name` attribute
 ##   --theme=<auto|runtime|editor-dark|editor-light>
 ##   --preset=<index>     screen size preset
+##   --panel-mode=<m>     scale preview: none, pixel, physical or screen
+##                        (Constant Pixel Size, Constant Physical Size,
+##                        Scale With Screen Size)
+##   --panel-scale=<s>    scale preview: PanelSettings Scale
+##   --panel-reference=<w>x<h>  scale preview: reference resolution
+##   --panel-match=<m>    scale preview: match (0 width .. 1 height)
+##   --panel-asset=<path> scale preview: a PanelSettings asset of the project
 ##   --source=<path>      show this file in the source view
 ##   --screenshot=<png>   save a screenshot after the first renders, then quit
 ##   --script-edit=<a=b>  demo: set attribute a to b on the selection first
@@ -35,7 +42,11 @@ const PRESETS := [
 	["1280 × 720", Vector2i(1280, 720)], ["1024 × 768", Vector2i(1024, 768)],
 	["800 × 600", Vector2i(800, 600)], ["390 × 844 (phone)", Vector2i(390, 844)],
 	["844 × 390 (phone landscape)", Vector2i(844, 390)],
+	["2560 × 1440", Vector2i(2560, 1440)], ["3840 × 2160", Vector2i(3840, 2160)],
+	["1080 × 1920 (portrait)", Vector2i(1080, 1920)], ["2560 × 1080 (ultrawide)", Vector2i(2560, 1080)],
 ]
+## --panel-mode values -> EdScalePreview modes.
+const PANEL_MODES := {"none": -1, "pixel": 0, "physical": 1, "screen": 2}
 const THEMES := [["Auto theme", "auto"], ["Runtime theme", "runtime"], ["Editor dark", "editor-dark"], ["Editor light", "editor-light"]]
 ## Edit menu: the commands; the labels show the current bindings of
 ## EdCommandRegistry. The shortcuts work in the canvas and the hierarchy (not
@@ -66,6 +77,8 @@ var states: EdStateMachineView
 var settings: EdSettings
 var drag: EdDragController
 var layout: EdLayoutController
+## The scale preview of the canvas (PanelSettings).
+var scale_preview: EdScalePreview
 ## Every command and its key bindings (the palette, the shortcut map and the
 ## key handlers read it).
 var commands: EdCommandRegistry
@@ -178,6 +191,9 @@ func _ready() -> void:
 	shell.set_menu_items("theme-menu", THEMES.map(func(t): return t[0]), _on_theme)
 	shell.set_menu_items("diag-severity-menu", SEVERITY_MENU.map(func(e): return e[0]), func(i, t): _set_diag_filter("severity", SEVERITY_MENU[i][1], "diag-severity-menu", t))
 	shell.set_menu_items("diag-source-menu", SOURCE_MENU.map(func(e): return e[0]), func(i, t): _set_diag_filter("source", SOURCE_MENU[i][1], "diag-source-menu", t))
+	scale_preview = EdScalePreview.new()
+	scale_preview.attach(shell, canvas.host)
+	scale_preview.changed.connect(_on_scale_changed)
 	canvas.picked.connect(_on_canvas_picked)
 	canvas.view_changed.connect(_update_zoom_label)
 	timeline = EdTimelineView.new()
@@ -407,6 +423,7 @@ func _parse_args() -> void:
 		get_tree().create_timer(float(_args["exit-after"])).timeout.connect(func(): get_tree().quit(3))
 	if _args.has("preset"):
 		_set_preset(int(_args["preset"]))
+	_panel_args()
 	if _args.has("theme"):
 		for i in THEMES.size():
 			if THEMES[i][1] == _args["theme"]:
@@ -426,6 +443,8 @@ func _parse_args() -> void:
 				state.execute(EdUxmlCommands.set_attribute(state.session, state.selection[0], kv[0], kv[1]), "args")
 		if _args.has("source"):
 			_show_source(_args["source"])
+		if _args.has("panel-asset") and not scale_preview.load_asset(String(_args["panel-asset"])):
+			push_warning("--panel-asset: %s is not a PanelSettings asset of the project" % _args["panel-asset"])
 	if _args.has("ready-file"):
 		# The journal is flushed at each edit, so the edits above are on
 		# disk now.
@@ -439,6 +458,32 @@ func _parse_args() -> void:
 		_smoke.call_deferred()
 	if _args.has("reel"):
 		add_child(EdReel.new(self))
+
+
+## The --panel-* options: custom settings of the scale preview.
+func _panel_args() -> void:
+	if not _args.has("panel-mode"):
+		return
+	var m: int = PANEL_MODES.get(String(_args["panel-mode"]), EdScalePreview.NONE)
+	var ref := Vector2i(1920, 1080)
+	var parts := String(_args.get("panel-reference", "")).split("x")
+	if parts.size() == 2 and parts[0].is_valid_int() and parts[1].is_valid_int():
+		ref = Vector2i(int(parts[0]), int(parts[1]))
+	scale_preview.set_custom(m, float(_args.get("panel-scale", "1")), ref,
+		UxmlPanelSettings.ScreenMatchMode.MATCH_WIDTH_OR_HEIGHT, float(_args.get("panel-match", "0")))
+
+
+## The scale preview changed: a new theme style sheet needs a full load;
+## a new scale lays the document out again by itself.
+func _on_scale_changed(needs_render: bool) -> void:
+	if needs_render:
+		_queue_render()
+	canvas.queue_redraw()
+	# The layout readout of the inspector after the new layout.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if is_inside_tree():
+		inspector.refresh()
 
 
 ## The --smoke option (a check of a packaged build): wait for the render,
@@ -550,6 +595,8 @@ func _set_preset(index: int) -> void:
 	_preset = clampi(index, 0, PRESETS.size() - 1)
 	canvas.set_screen_size(PRESETS[_preset][1])
 	_set_menu_text("preset-menu", PRESETS[_preset][0])
+	if scale_preview != null:
+		scale_preview.refresh_info()
 	_queue_render()
 
 
@@ -852,7 +899,7 @@ func _on_items_chosen(list_name: String, indices: Array) -> void:
 
 
 func _on_shell_value(element_name: String, value: Variant) -> void:
-	if timeline.on_value(element_name, value) or states.on_value(element_name, value):
+	if timeline.on_value(element_name, value) or states.on_value(element_name, value) or scale_preview.on_value(element_name, value):
 		return
 	match element_name:
 		"palette-search":
@@ -1038,6 +1085,7 @@ func _on_project_opened() -> void:
 	state.workspace.history.history_changed.connect(_update_history_label)
 	_update_history_label()
 	_refresh_files()
+	scale_preview.set_project(state.store)
 	# The folder name; the tooltip has the whole path. A screenshot or a
 	# shared screen shows no local path.
 	shell.set_text("document-label", project_label(state.store.root))

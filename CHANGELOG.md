@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Scale preview of the canvas (Unity's PanelSettings). A bar under the canvas
+  header sets the scale mode (1 px per point, Constant Pixel Size, Constant
+  Physical Size, Scale With Screen Size), the scale, the reference
+  resolution, the screen match mode, the match, the reference DPI and the
+  screen DPI. A label shows the resolved pixels per point and the panel size
+  in points. A PanelSettings `.asset` of the open project loads from a menu
+  with `UxmlPanelSettings.load_unity_asset`, with its theme style sheet
+  (`.tss`). The preview is editor state: no UXML or USS text changes. The
+  editor keeps no canvas settings between sessions, so the preview starts
+  at 1 px per point.
+- Screen presets 2560 × 1440, 3840 × 2160, 1080 × 1920 (portrait) and
+  2560 × 1080 (ultrawide), after the existing presets (the `--preset`
+  indices do not change).
+- Command-line options of the preview: `--panel-mode`, `--panel-scale`,
+  `--panel-reference`, `--panel-match` and `--panel-asset`.
+- Fixture project `fixtures/projects/panel`: a PanelSettings asset and a
+  `.tss` theme that Unity wrote, a second `.asset` that is not a
+  PanelSettings asset, and the settings screen of the godot-uxml scaled
+  parity cases. The round trip has 217 fixtures.
+- `tests/unit/test_app_scale.gd`: the resolved scale, the fields of the bar,
+  the asset with its theme, and select, move, resize, snap and nudge at
+  0.5625, 1.333 and 2 pixels per point, on both godot-uxml paths.
+
+### Changed
+
+- godot-uxml moved to `c8fa2c7`: PanelSettings scaling (`UxmlPanelSettings`,
+  `.tss` themes, `UxmlDocument.panel_settings`, `get_pixels_per_point()`,
+  `get_panel_size()`, `panel_to_document()`, `document_to_panel()`), the
+  release safety checks again, and the cascade-output and load
+  improvements. The pin copies the addon and the `.uxml` and `.uss` parity
+  cases only; the scaled parity dumps (about 28 MB) stay out of the editor
+  repository.
+- Canvas units (godot-uxml docs/design.md, "Panel scaling"). The overlay,
+  the hit test and the pointer use document pixels. The layout controller
+  plans moves, resizes and nudges in panel points, the units of the USS
+  values: the start rectangles, the snap targets, the grid and the snap
+  threshold are in points, and the guides go back to the canvas in pixels.
+  A nudge key moves one point. The size chip of the selection and the layout
+  readout of the inspector show points. The rotated outline of a
+  transformed element ignores the panel scale.
+
 ## [0.8.0] - 2026-11-08
 
 ### Changed (Godot rebuild, branch `godot`)

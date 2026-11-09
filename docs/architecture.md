@@ -303,6 +303,23 @@ workspace.
   bottom) snap to the edges and centres of the siblings and the parent
   within 6 screen pixels, and draw a guide. Without a target the leading
   edge snaps to the pixel grid.
+- **Units and the scale preview.** `EdRenderHost.panel_settings` (a
+  `UxmlPanelSettings`, set from `EdScalePreview`, the bar under the canvas
+  header) scales the document as Unity's PanelSettings does. godot-uxml
+  `docs/design.md`, "Panel scaling", gives the contract: `element_at()` and
+  `get_element_rect()` without a space use document pixels (the
+  SubViewport); the layout and the USS values use panel points; a point is
+  `get_pixels_per_point()` pixels. The canvas overlay, the hit test, the
+  drop hints and the pointer use document pixels. `EdLayoutController`
+  plans in points: `points_rect_of()` for the element and the parent,
+  `sibling_rects(id, true)` for the snap targets, the pointer travel divided
+  by the pixels per point, the grid in points, and the snap threshold of 6
+  view pixels as `6 / (zoom * pixels per point)` points. The guides go back
+  to the canvas in pixels (`to_pixels()`). The size chip and the layout
+  readout of the inspector show points. The transform of an element includes
+  the panel scale, so the rotated outline draws only for a transform of the
+  element itself. The preview is editor state: no text changes, and a new
+  theme style sheet of the settings needs a full `render()`.
 - **Hit-test.** `EdRenderHost.hit_test()` is `UxmlDocument.element_at()`
   (request R8): transforms and `overflow: hidden` clipping apply. A hit on
   a control part selects the control; a hit on template content selects
@@ -731,7 +748,7 @@ by its PID.
 - Core: patch sets, buffers, history, locators, both parsers, the UXML and
   USS commands (ported from the TypeScript suites), project store.
 - Round trip: open and save every fixture of `fixtures/projects` and the
-  godot-uxml parity cases (211 files); the bytes stay the same.
+  godot-uxml parity cases (217 files); the bytes stay the same.
 - Alignment: the editor parsers against godot-uxml for every fixture.
 - App: the real editor scene, headless: open, hit-test, selection sync,
   inspector and source edits through one history, re-render from unsaved

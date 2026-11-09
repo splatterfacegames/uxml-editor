@@ -294,7 +294,9 @@ func _view() -> Dictionary:
 
 	v["layout"] = null
 	if _host != null:
-		var r := _host.rect_of(n.id)
+		# Points: the units of the USS values (the scale preview of the
+		# canvas has another number of pixels per point).
+		var r := _host.points_rect_of(n.id)
 		if r.size == Vector2.ZERO and _host.control_of(n.id) == null:
 			v["layout"] = "Not drawn (non-visual or hidden)."
 		else:

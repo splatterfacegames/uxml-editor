@@ -13,8 +13,9 @@ pass (see "Frame cost" below). Before milestone 4 the pin moved to
 godot-uxml `6137987` (requests R1-R14), and the editor replaced every
 workaround with the godot-uxml editor APIs (see "Re-pin" below). Before
 milestone 7 the pin moved to `dc2c081` (R15, R16, R11), before milestone 8
-to `1167eb1` (R17-R26), and after milestone 8 to `f4ffe6e` (R17, R27-R29)
-and `5a51b92` (R30-R32).
+to `1167eb1` (R17-R26), and after milestone 8 to `f4ffe6e` (R17, R27-R29),
+`5a51b92` (R30-R32) and `c8fa2c7` (PanelSettings scaling, with the scale
+preview of the canvas).
 
 The milestones that are not done are a proposal. Each milestone ends with the headless
 suite green on both godot-uxml paths and a screenshot set. godot-uxml
@@ -406,6 +407,43 @@ machine during the runs.
 - **Field values** through `set_field_value` cost about 0.15 ms each against
   0.02 ms for a direct `LineEdit` write: selection on the menu fixture went from
   9.8 to 10.4-10.7 ms native.
+
+## Re-pin to godot-uxml c8fa2c7 and the scale preview (done)
+
+The pin moved from `5a51b92` to `c8fa2c7`: Unity's PanelSettings scaling
+(`UxmlPanelSettings`, `load_unity_asset`, `.tss` themes,
+`UxmlDocument.panel_settings`, `get_pixels_per_point()`, `get_panel_size()`,
+`panel_to_document()`, `document_to_panel()`), the release safety checks
+again, and the cascade-output and load improvements. The update tool copies
+the addon and the `.uxml` and `.uss` parity cases; the scaled parity dumps
+(about 28 MB, `bench/parity/unity-scaled`) stay out of the repository.
+
+Done:
+
+- **Scale preview** (`src/app/scale_preview.gd`, `EdScalePreview`): a bar
+  under the canvas header with the scale mode, the scale, the reference
+  resolution, the screen match mode, the match, the reference DPI and the
+  screen DPI. The info label shows the pixels per point and the panel size
+  in points. The asset menu lists the PanelSettings `.asset` files of the
+  project (the head of each `.asset` names the PanelSettings class) and
+  loads one with `UxmlPanelSettings.load_unity_asset`, with its `.tss`.
+  New presets: 2560 × 1440, 3840 × 2160, 1080 × 1920 and 2560 × 1080.
+- **Units.** The canvas uses document pixels; the layout controller plans in
+  panel points (see `docs/architecture.md`, "Canvas manipulation"). Tests:
+  `tests/unit/test_app_scale.gd` selects, moves, resizes, snaps and nudges
+  at 0.5625, 1.333 and 2 pixels per point.
+- Screenshots: `docs/screenshots/scale-1080x1920-sws.png` and
+  `docs/screenshots/scale-3840x2160.png`.
+
+Not done:
+
+- The editor keeps no canvas settings between sessions (screen size, grid,
+  theme, scale preview). A per-project store of the canvas settings is a
+  separate change.
+- The canvas has no rulers. Rulers in points are a proposal.
+- The grid is a snap grid only; the canvas draws no grid.
+- The preview does not show Godot's stretch (`display/window/stretch`); the
+  SubViewport of the canvas has one device pixel per document pixel.
 
 ## Re-pin to godot-uxml 5a51b92 (done)
 

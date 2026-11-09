@@ -22,6 +22,13 @@ extends RefCounted
 ## end of the drag there instead (one undo step); Cancel undoes the drag.
 ## Arrow-key nudges use a remembered choice and else the winner, without
 ## the picker.
+##
+## Units (godot-uxml docs/design.md, "Panel scaling"). The canvas sends
+## pointer travel in document pixels. The controller plans in panel points,
+## the units of the USS values: the start rectangles, the snap targets, the
+## grid and the threshold are in points, and the travel is divided by the
+## pixels per point of the scale preview. The guides go back to the canvas
+## in document pixels. A nudge key moves one point (Shift: ten).
 
 const NUDGE_PAUSE := 0.8
 const NUDGE_FRAMES := 2
@@ -69,13 +76,12 @@ func begin(handle: String) -> void:
 		return
 	var id: int = n.id
 	var host := canvas.host
-	var pid := host.parent_id(id)
-	var parent_rect := host.rect_of(pid) if pid >= 0 else Rect2(Vector2.ZERO, canvas.screen_size())
 	_counter += 1
 	_gesture = {
 		"handle": handle, "base": base, "key": "gesture:%d" % _counter,
 		"style": {id: host.style_facts(id)},
-		"targets": EdSnap.targets(parent_rect, host.sibling_rects(id)),
+		"targets": EdSnap.targets(_parent_points(id), host.sibling_rects(id, true)),
+		"ppp": host.pixels_per_point(),
 		"label": ("Move %s" if handle == "move" else "Resize %s") % n.local,
 		"steps": 0, "locator": EdLocator.create(n),
 		# property -> {choice, ask, choices} (EdInspectorView.gesture_target)
@@ -87,12 +93,14 @@ func begin(handle: String) -> void:
 func update(handle: String, delta: Vector2, keep_ratio: bool, no_snap: bool) -> void:
 	if _gesture.is_empty() or handle != _gesture["handle"]:
 		return
-	var d := delta
+	var ppp: float = _gesture["ppp"]
+	# Document pixels -> points.
+	var d := delta / ppp
 	var base: Dictionary = _gesture["base"]
 	if snap_enabled and not no_snap:
-		var s := EdSnap.snap_gesture(base["rect"], handle, delta, _gesture["targets"], float(grid), SNAP_THRESHOLD_VIEW / canvas.zoom)
+		var s := EdSnap.snap_gesture(base["rect"], handle, d, _gesture["targets"], float(grid), SNAP_THRESHOLD_VIEW / (canvas.zoom * ppp))
 		d = s["delta"]
-		canvas.guides = {"x": s["guides_x"], "y": s["guides_y"]}
+		canvas.guides = _guides_to_pixels(s["guides_x"], s["guides_y"])
 	else:
 		canvas.guides = {}
 	var writes = EdLayoutCommands.gesture_writes(base, handle, d, keep_ratio)
@@ -284,15 +292,30 @@ func rendered() -> void:
 
 # ---------------------------------------------------------------------------
 
+## The start state of a gesture on `n`, in panel points.
 func _base_for(n: EdUxmlNode) -> Variant:
 	var host := canvas.host
 	var id: int = n.id
 	if host.control_of(id) == null:
 		return EdError.make("not-rendered", "%s is not drawn; it has no layout to change." % n.local)
 	var pid := host.parent_id(id)
-	var parent_rect := host.rect_of(pid) if pid >= 0 else Rect2(Vector2.ZERO, canvas.screen_size())
 	var border := host.border_start(pid) if pid >= 0 else Vector2.ZERO
-	return EdLayoutCommands.gesture_base(n, host.style_facts(id), host.rect_of(id), parent_rect, border)
+	return EdLayoutCommands.gesture_base(n, host.style_facts(id), host.points_rect_of(id), _parent_points(id), border)
+
+
+## The border box of the authored parent of `id` in panel points; the panel
+## for the root.
+func _parent_points(id: int) -> Rect2:
+	var host := canvas.host
+	var pid := host.parent_id(id)
+	return host.points_rect_of(pid) if pid >= 0 else Rect2(Vector2.ZERO, host.panel_size())
+
+
+## Snap guides in panel points -> document pixels (the canvas draws them).
+func _guides_to_pixels(xs: Array, ys: Array) -> Dictionary:
+	var host := canvas.host
+	return {"x": xs.map(func(x): return host.to_pixels(Vector2(float(x), 0.0)).x),
+		"y": ys.map(func(y): return host.to_pixels(Vector2(0.0, float(y))).y)}
 
 
 func _queue(step: Dictionary) -> void:

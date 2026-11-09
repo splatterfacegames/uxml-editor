@@ -15,6 +15,12 @@ extends Control
 ## scrolling and text input work as at runtime. Ctrl+wheel zooms and the
 ## middle button pans.
 ##
+## Units: the overlay, the hit test and the gesture signals use document
+## pixels (the SubViewport). Under a scale preview (EdRenderHost
+## panel_settings) a point of the layout is pixels_per_point() pixels; the
+## size chip shows points, the units of the USS values. The layout
+## controller turns pixels into points.
+##
 ## Native Godot control: a SubViewport keeps the edited document apart from
 ## the editor's own godot-uxml documents (input, focus, theme).
 
@@ -211,7 +217,10 @@ func _draw_transformed(id: int) -> void:
 	if b.is_empty():
 		return
 	var t: Transform2D = b["transform"]
-	if t.x.is_equal_approx(Vector2.RIGHT) and t.y.is_equal_approx(Vector2.DOWN):
+	# The transform includes the panel scale (points -> pixels); only a
+	# transform of the element itself draws the outline.
+	var ppp := host.pixels_per_point()
+	if t.x.is_equal_approx(Vector2(ppp, 0)) and t.y.is_equal_approx(Vector2(0, ppp)):
 		return
 	var sz: Vector2 = b["size"]
 	var pts := PackedVector2Array()
@@ -231,8 +240,8 @@ func _draw_chip(v: Rect2, id: int) -> void:
 	var el = host.element_for_node.get(id)
 	if el == null:
 		return
-	var r := host.rect_of(id)
-	var label := "%s  %d × %d" % [el.local, int(round(r.size.x)), int(round(r.size.y))]
+	var r := host.points_rect_of(id)
+	var label := "%s  %s × %s" % [el.local, _num(r.size.x), _num(r.size.y)]
 	if selected_ids.size() > 1:
 		label += "  (+%d)" % (selected_ids.size() - 1)
 	var fs := 12
@@ -242,6 +251,13 @@ func _draw_chip(v: Rect2, id: int) -> void:
 		pos.y = v.end.y + 6
 	draw_rect(Rect2(pos, Vector2(w, 16)), ACCENT)
 	draw_string(_label_font, pos + Vector2(5, 12), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+
+
+## A size in points: whole numbers as they are, others with two decimals
+## (399.75 points at 1.333 pixels per point).
+static func _num(v: float) -> String:
+	var r := snappedf(v, 0.01)
+	return str(int(r)) if is_equal_approx(r, roundf(r)) else String.num(r, 2)
 
 
 static func _handle_point(v: Rect2, h: String) -> Vector2:

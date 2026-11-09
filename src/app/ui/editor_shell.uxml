@@ -59,6 +59,32 @@
           <ui:VisualElement class="panel">
             <ui:VisualElement name="tabs-host" class="host tabs-host" />
             <ui:Label name="canvas-header" class="panel-header" text="Canvas" />
+            <ui:VisualElement name="scale-bar" class="panel-header-row scale-bar">
+              <uie:ToolbarMenu name="panel-asset-menu" class="scale-menu panel-asset-menu" text="No PanelSettings asset" tooltip="Preview with a PanelSettings asset of the project (its scale and its theme style sheet)" />
+              <uie:ToolbarMenu name="scale-mode-menu" class="scale-menu scale-mode-menu" text="1 px per point" tooltip="Scale mode of the preview (Unity's PanelSettings). The preview is editor state, not part of the UXML or USS." />
+              <ui:VisualElement name="scale-group" class="scale-group hidden">
+                <ui:Label class="scale-caption" text="Scale" />
+                <ui:TextField name="scale-field" class="scale-field" is-delayed="true" value="1" tooltip="PanelSettings Scale: the panel draws this many times larger" />
+              </ui:VisualElement>
+              <ui:VisualElement name="reference-group" class="scale-group hidden">
+                <ui:Label class="scale-caption" text="Reference" />
+                <ui:TextField name="reference-width-field" class="scale-field scale-field-wide" is-delayed="true" value="1920" tooltip="Reference resolution: width in pixels" />
+                <ui:Label class="scale-caption" text="×" />
+                <ui:TextField name="reference-height-field" class="scale-field scale-field-wide" is-delayed="true" value="1080" tooltip="Reference resolution: height in pixels" />
+              </ui:VisualElement>
+              <uie:ToolbarMenu name="match-mode-menu" class="scale-menu hidden" text="Match Width Or Height" tooltip="Screen match mode" />
+              <ui:VisualElement name="match-group" class="scale-group hidden">
+                <ui:Label class="scale-caption" text="Match" />
+                <ui:TextField name="match-field" class="scale-field" is-delayed="true" value="0" tooltip="0 matches the width, 1 the height (a linear blend, as Unity's)" />
+              </ui:VisualElement>
+              <ui:VisualElement name="dpi-group" class="scale-group hidden">
+                <ui:Label class="scale-caption" text="Reference DPI" />
+                <ui:TextField name="reference-dpi-field" class="scale-field" is-delayed="true" value="96" tooltip="The DPI the UI is designed for" />
+                <ui:Label class="scale-caption" text="Screen DPI" />
+                <ui:TextField name="dpi-field" class="scale-field" is-delayed="true" value="96" tooltip="The DPI of the previewed screen" />
+              </ui:VisualElement>
+              <ui:Label name="scale-info" class="scale-info" text="1 px/pt" tooltip="Pixels per point and the size of the panel in points (the units of the USS values)" />
+            </ui:VisualElement>
             <ui:VisualElement name="canvas-host" class="host grow" />
           </ui:VisualElement>
           <ui:TwoPaneSplitView name="lower-split" orientation="Vertical" fixed-pane-index="0" fixed-pane-initial-dimension="150">

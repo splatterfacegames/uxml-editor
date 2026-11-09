@@ -54,6 +54,15 @@ message. Such an edit changes no file and adds no undo step.
   snapping on and off; the grid menu sets the grid. Alt or Ctrl during a
   drag turns snapping off for that drag. Shift keeps the aspect ratio of a
   corner resize.
+- **Scale preview.** The bar under the canvas header previews Unity's
+  PanelSettings scaling on the screen size of the canvas: the scale mode
+  (1 px per point, Constant Pixel Size, Constant Physical Size, Scale With
+  Screen Size), the scale, the reference resolution, the screen match mode,
+  the match and the DPI. The bar shows the pixels per point and the panel
+  size in points. The asset menu loads a PanelSettings `.asset` of the
+  project with its `.tss` theme. Moves, resizes, nudges, the grid and the
+  size chip use points, the units of the USS values. The preview changes no
+  source text.
 - **Preview.** **Preview** (Ctrl+P) sends the mouse and the keyboard to the
   document. Buttons, toggles, fields, sliders and scroll views work as at
   runtime. Preview changes no source text. The end of preview renders the
@@ -230,6 +239,8 @@ with Godot's Movie Maker at 60 fps, 1920x1080, one PNG per frame.
 | `docs/screenshots/m8-web-edited.png` | The web export in Chrome: a project from a zip, a button duplicated through the palette. |
 | `docs/screenshots/m8-web-fs-saved.png` | The web export with the File System Access API after a save. |
 | `docs/screenshots/m8-web-conflict.png` | The web export: a file changed on disk, and the editor asks before an overwrite. |
+| `docs/screenshots/scale-1080x1920-sws.png` | The scale preview: Scale With Screen Size, reference 1920 × 1080, match 0.5, on a 1080 × 1920 portrait screen (1.1701 px/pt). The selected card is 40% of the panel width in points. |
+| `docs/screenshots/scale-3840x2160.png` | The scale preview with the PanelSettings asset of the `panel` fixture on a 3840 × 2160 screen (2 px/pt, a panel of 1920 × 1080 pt). |
 | `docs/screenshots/web-sample.png` | The web export with the sample project of the site (`?sample=sample`). |
 | `docs/screenshots/web-sample-1240.png` | The same at 1240 × 698, the size of the editor in the site: the fixed panes are smaller, and the source view keeps room. |
 | `docs/screenshots/web-sample-1240@2x.png` | The same at a device scale factor of 2: the editor draws at the device pixel ratio. |
@@ -355,7 +366,12 @@ godot --path . -- --project=fixtures/projects/menu --open=Assets/UI/Menu.uxml
 | `--open=<path>` | Open the UXML document (path in the project). |
 | `--select=<name>` | Select the element with this `name` attribute. |
 | `--theme=<auto\|runtime\|editor-dark\|editor-light>` | Set the canvas theme. |
-| `--preset=<index>` | Set the screen size (0 = 1920 × 1080). |
+| `--preset=<index>` | Set the screen size (0 = 1920 × 1080, 7 = 2560 × 1440, 8 = 3840 × 2160, 9 = 1080 × 1920, 10 = 2560 × 1080). |
+| `--panel-mode=<none\|pixel\|physical\|screen>` | Set the scale mode of the scale preview. |
+| `--panel-scale=<s>` | Set the scale of the preview. |
+| `--panel-reference=<w>x<h>` | Set the reference resolution of the preview (Scale With Screen Size). |
+| `--panel-match=<m>` | Set the match of the preview (0: width, 1: height). |
+| `--panel-asset=<path>` | Load a PanelSettings asset of the project into the preview. |
 | `--screenshot=<file.png>` | Save a screenshot, then stop the editor. |
 | `--demo=<name>` | Before the screenshot, stage a documentation state: `palette`, `drag-canvas`, `drag-hierarchy`, `resize`, `multi`, `preview`, `diagnostics`, `tabs`, `recovery`, `conflict`, `context-menu`, `provenance`, `picker`, `states`, `classes`, `timeline`, `timeline-classes`, `easing`, `canvas-picker`, `narrow`, `states-node`, `states-edge`, `commands` or `shortcuts`. |
 | `--gdscript` | Use the GDScript path of godot-uxml (no native core). |
